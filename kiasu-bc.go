@@ -102,29 +102,21 @@ var (
 	}
 )
 
-// gmul performs multiplication in GF(2^8) using precomputed tables
+// gmul performs multiplication in GF(2^8)
 func gmul(a, b byte) byte {
-	switch b {
-	case 2:
-		return gmul2[a]
-	case 3:
-		return gmul3[a]
-	default:
-		// Fallback to original implementation for other multipliers
-		var p byte
-		for i := 0; i < 8; i++ {
-			if (b & 1) != 0 {
-				p ^= a
-			}
-			highBitSet := (a & 0x80) != 0
-			a <<= 1
-			if highBitSet {
-				a ^= 0x1b
-			}
-			b >>= 1
+	var p byte
+	for i := 0; i < 8; i++ {
+		if (b & 1) != 0 {
+			p ^= a
 		}
-		return p
+		highBitSet := (a & 0x80) != 0
+		a <<= 1
+		if highBitSet {
+			a ^= 0x1b
+		}
+		b >>= 1
 	}
+	return p
 }
 
 // KiasuBCEncrypt encrypts a 16-byte block using KIASU-BC with the given key and tweak.
@@ -319,10 +311,10 @@ func mixColumns(state []byte) {
 		s2 := state[i+2]
 		s3 := state[i+3]
 
-		state[i] = gmul(0x02, s0) ^ gmul(0x03, s1) ^ s2 ^ s3
-		state[i+1] = s0 ^ gmul(0x02, s1) ^ gmul(0x03, s2) ^ s3
-		state[i+2] = s0 ^ s1 ^ gmul(0x02, s2) ^ gmul(0x03, s3)
-		state[i+3] = gmul(0x03, s0) ^ s1 ^ s2 ^ gmul(0x02, s3)
+		state[i] = gmul2[s0] ^ gmul3[s1] ^ s2 ^ s3
+		state[i+1] = s0 ^ gmul2[s1] ^ gmul3[s2] ^ s3
+		state[i+2] = s0 ^ s1 ^ gmul2[s2] ^ gmul3[s3]
+		state[i+3] = gmul3[s0] ^ s1 ^ s2 ^ gmul2[s3]
 	}
 }
 
