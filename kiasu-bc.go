@@ -24,34 +24,57 @@ func expandKey(key []byte) [][]byte {
 		panic("key must be 16 bytes")
 	}
 
+	// Pre-allocate all memory at once
 	roundKeys := make([][]byte, 11)
-	roundKeys[0] = make([]byte, 16)
+	allKeys := make([]byte, 11*16)
+	for i := range roundKeys {
+		roundKeys[i] = allKeys[i*16 : (i+1)*16]
+	}
+
+	// Copy initial key
 	copy(roundKeys[0], key)
 
+	// Single temporary buffer for all rounds
+	temp := make([]byte, 4)
+
 	for i := 1; i < 11; i++ {
-		roundKeys[i] = make([]byte, 16)
 		prevKey := roundKeys[i-1]
+		currKey := roundKeys[i]
 
 		// First word
-		temp := make([]byte, 4)
-		copy(temp, prevKey[12:16])
 		// RotWord
-		temp[0], temp[1], temp[2], temp[3] = temp[1], temp[2], temp[3], temp[0]
+		temp[0] = prevKey[13]
+		temp[1] = prevKey[14]
+		temp[2] = prevKey[15]
+		temp[3] = prevKey[12]
 		// SubWord
-		for j := 0; j < 4; j++ {
-			temp[j] = sbox[temp[j]]
-		}
+		temp[0] = sbox[temp[0]]
+		temp[1] = sbox[temp[1]]
+		temp[2] = sbox[temp[2]]
+		temp[3] = sbox[temp[3]]
 		// XOR with Rcon
 		temp[0] ^= rcon[i-1]
 		// XOR with previous key
-		for j := 0; j < 4; j++ {
-			roundKeys[i][j] = prevKey[j] ^ temp[j]
-		}
+		currKey[0] = prevKey[0] ^ temp[0]
+		currKey[1] = prevKey[1] ^ temp[1]
+		currKey[2] = prevKey[2] ^ temp[2]
+		currKey[3] = prevKey[3] ^ temp[3]
 
 		// Remaining words
-		for j := 4; j < 16; j++ {
-			roundKeys[i][j] = roundKeys[i][j-4] ^ prevKey[j]
-		}
+		currKey[4] = currKey[0] ^ prevKey[4]
+		currKey[5] = currKey[1] ^ prevKey[5]
+		currKey[6] = currKey[2] ^ prevKey[6]
+		currKey[7] = currKey[3] ^ prevKey[7]
+
+		currKey[8] = currKey[4] ^ prevKey[8]
+		currKey[9] = currKey[5] ^ prevKey[9]
+		currKey[10] = currKey[6] ^ prevKey[10]
+		currKey[11] = currKey[7] ^ prevKey[11]
+
+		currKey[12] = currKey[8] ^ prevKey[12]
+		currKey[13] = currKey[9] ^ prevKey[13]
+		currKey[14] = currKey[10] ^ prevKey[14]
+		currKey[15] = currKey[11] ^ prevKey[15]
 	}
 
 	return roundKeys
