@@ -15,29 +15,29 @@ import (
 	"net"
 )
 
-// KeySizeDeterministic is the size in bytes of the key for ipcrypt-deterministic mode.
-const KeySizeDeterministic = 16
+// Key sizes for different encryption modes
+const (
+	KeySizeDeterministic = 16 // Size in bytes of the key for ipcrypt-deterministic mode
+	KeySizeND            = 16 // Size in bytes of the key for ipcrypt-nd mode
+	KeySizeNDX           = 32 // Size in bytes of the key for ipcrypt-ndx mode
+)
 
-// KeySizeND is the size in bytes of the key for ipcrypt-nd mode.
-const KeySizeND = 16
+// Tweak sizes for different encryption modes
+const (
+	TweakSize  = 8  // Size in bytes of the tweak for ipcrypt-nd mode
+	TweakSizeX = 16 // Size in bytes of the tweak for ipcrypt-ndx mode
+)
 
-// KeySizeNDX is the size in bytes of the key for ipcrypt-ndx mode.
-const KeySizeNDX = 32
-
-// TweakSize is the size in bytes of the tweak for ipcrypt-nd mode.
-const TweakSize = 8
-
-// TweakSizeX is the size in bytes of the tweak for ipcrypt-ndx mode.
-const TweakSizeX = 16
-
-// Error definitions for the package.
+// Error definitions for the package
 var (
 	ErrInvalidKeySize = errors.New("invalid key size")
 	ErrInvalidIP      = errors.New("invalid IP address")
 	ErrInvalidTweak   = errors.New("invalid tweak size")
 )
 
-// validateKey checks if the key length matches the expected size.
+// Utility functions
+
+// validateKey checks if the key length matches the expected size
 func validateKey(key []byte, expectedSize int) error {
 	if len(key) != expectedSize {
 		return fmt.Errorf("%w: got %d bytes, want %d bytes", ErrInvalidKeySize, len(key), expectedSize)
@@ -45,7 +45,7 @@ func validateKey(key []byte, expectedSize int) error {
 	return nil
 }
 
-// validateIP ensures the IP address is valid and can be converted to 16-byte form.
+// validateIP ensures the IP address is valid and can be converted to 16-byte form
 func validateIP(ip net.IP) ([]byte, error) {
 	if ip == nil {
 		return nil, ErrInvalidIP
@@ -57,7 +57,7 @@ func validateIP(ip net.IP) ([]byte, error) {
 	return ip16, nil
 }
 
-// validateTweak checks if the tweak length matches the expected size.
+// validateTweak checks if the tweak length matches the expected size
 func validateTweak(tweak []byte, expectedSize int) error {
 	if len(tweak) != expectedSize {
 		return fmt.Errorf("%w: got %d bytes, want %d bytes", ErrInvalidTweak, len(tweak), expectedSize)
@@ -65,7 +65,7 @@ func validateTweak(tweak []byte, expectedSize int) error {
 	return nil
 }
 
-// xorBytes performs XOR operation on two byte slices of equal length.
+// xorBytes performs XOR operation on two byte slices of equal length
 func xorBytes(a, b []byte) []byte {
 	if len(a) != len(b) {
 		return nil
@@ -76,6 +76,8 @@ func xorBytes(a, b []byte) []byte {
 	}
 	return c
 }
+
+// Deterministic mode functions
 
 // EncryptIP encrypts an IP address using ipcrypt-deterministic mode.
 // The key must be exactly KeySizeDeterministic bytes long.
@@ -124,6 +126,8 @@ func DecryptIP(key []byte, encrypted net.IP) (net.IP, error) {
 
 	return net.IP(decrypted), nil
 }
+
+// Non-deterministic mode functions
 
 // EncryptIPNonDeterministic encrypts an IP address using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
@@ -185,6 +189,8 @@ func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
 
 	return net.IP(decrypted).String(), nil
 }
+
+// Extended non-deterministic mode functions
 
 // EncryptIPNonDeterministicX encrypts an IP address using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
@@ -260,9 +266,6 @@ func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
 		return "", fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), TweakSizeX+16)
 	}
 
-	tweak := ciphertext[:TweakSizeX]
-	encryptedIP := ciphertext[TweakSizeX:]
-
 	key1 := key[:KeySizeND]
 	key2 := key[KeySizeND:]
 
@@ -275,6 +278,9 @@ func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create second cipher: %w", err)
 	}
+
+	tweak := ciphertext[:TweakSizeX]
+	encryptedIP := ciphertext[TweakSizeX:]
 
 	encryptedTweak := make([]byte, 16)
 	block2.Encrypt(encryptedTweak, tweak)
