@@ -12,7 +12,7 @@ The implementation provides three methods for IP address encryption:
 
 ## Installation
 
-```bash
+```sh
 go get github.com/jedisct1/go-ipcrypt
 ```
 
