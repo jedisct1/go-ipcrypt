@@ -428,7 +428,7 @@ func TestRandomIPs(t *testing.T) {
 	}
 
 	const numTests = 100
-	for i := 0; i < numTests; i++ {
+	for range numTests {
 		ip := generateRandomIP(t)
 		ipAddr := net.ParseIP(ip)
 		if ipAddr == nil {
