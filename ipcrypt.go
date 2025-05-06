@@ -10,6 +10,7 @@ package ipcrypt
 import (
 	"crypto/aes"
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
@@ -71,9 +72,7 @@ func xorBytes(a, b []byte) []byte {
 		return nil
 	}
 	c := make([]byte, len(a))
-	for i := range a {
-		c[i] = a[i] ^ b[i]
-	}
+	subtle.XORBytes(c, a, b)
 	return c
 }
 
