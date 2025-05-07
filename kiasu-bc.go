@@ -92,7 +92,7 @@ var invSbox = [256]byte{
 // gmul performs multiplication in GF(2^8)
 func gmul(a, b byte) byte {
 	var p byte
-	for range 8 {
+	for i := 0; i < 8; i++ {
 		if (b & 1) != 0 {
 			p ^= a
 		}
@@ -255,14 +255,14 @@ func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
 	copy(state, block)
 
 	// Initial round
-	for i := range 16 {
+	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
 	}
 
 	// Main rounds
 	for round := 1; round < 10; round++ {
 		// SubBytes
-		for i := range 16 {
+		for i := 0; i < 16; i++ {
 			state[i] = sbox[state[i]]
 		}
 
@@ -273,14 +273,14 @@ func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
 		mixColumns(state)
 
 		// AddRoundKey
-		for i := range 16 {
+		for i := 0; i < 16; i++ {
 			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
 		}
 	}
 
 	// Final round
 	// SubBytes
-	for i := range 16 {
+	for i := 0; i < 16; i++ {
 		state[i] = sbox[state[i]]
 	}
 
@@ -288,7 +288,7 @@ func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
 	shiftRows(state)
 
 	// AddRoundKey
-	for i := range 16 {
+	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
 	}
 
@@ -316,7 +316,7 @@ func KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error) {
 	copy(state, block)
 
 	// Initial round
-	for i := range 16 {
+	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
 	}
 
@@ -324,14 +324,14 @@ func KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error) {
 	invShiftRows(state)
 
 	// Inverse SubBytes
-	for i := range 16 {
+	for i := 0; i < 16; i++ {
 		state[i] = invSbox[state[i]]
 	}
 
 	// Main rounds
 	for round := 9; round > 0; round-- {
 		// AddRoundKey
-		for i := range 16 {
+		for i := 0; i < 16; i++ {
 			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
 		}
 
@@ -342,14 +342,14 @@ func KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error) {
 		invShiftRows(state)
 
 		// Inverse SubBytes
-		for i := range 16 {
+		for i := 0; i < 16; i++ {
 			state[i] = invSbox[state[i]]
 		}
 	}
 
 	// Final round
 	// AddRoundKey
-	for i := range 16 {
+	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
 	}
 
