@@ -145,9 +145,7 @@ func EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, err
 	var t []byte
 	if tweak == nil {
 		t = make([]byte, TweakSize)
-		if _, err := rand.Read(t); err != nil {
-			return nil, fmt.Errorf("failed to generate tweak: %w", err)
-		}
+		rand.Read(t)
 	} else {
 		if err := validateTweak(tweak, TweakSize); err != nil {
 			return nil, err
@@ -221,9 +219,7 @@ func EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, er
 	var t []byte
 	if tweak == nil {
 		t = make([]byte, TweakSizeX)
-		if _, err := rand.Read(t); err != nil {
-			return nil, fmt.Errorf("failed to generate tweak: %w", err)
-		}
+		rand.Read(t)
 	} else {
 		if err := validateTweak(tweak, TweakSizeX); err != nil {
 			return nil, err

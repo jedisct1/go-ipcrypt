@@ -306,9 +306,7 @@ func TestIPNonDeterministic(t *testing.T) {
 
 	// Test with random tweak
 	key := make([]byte, KeySizeND)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("Failed to generate random key: %v", err)
-	}
+	rand.Read(key)
 
 	encrypted, err := EncryptIPNonDeterministic("192.168.1.1", key, nil)
 	if err != nil {
@@ -391,9 +389,7 @@ func TestIPNonDeterministicX(t *testing.T) {
 
 	// Test with random tweak
 	key := make([]byte, KeySizeNDX)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("Failed to generate random key: %v", err)
-	}
+	rand.Read(key)
 
 	encrypted, err := EncryptIPNonDeterministicX("192.168.1.1", key, nil)
 	if err != nil {
@@ -414,18 +410,14 @@ func TestIPNonDeterministicX(t *testing.T) {
 func generateRandomIP(t *testing.T) string {
 	t.Helper()
 	b := make([]byte, 4)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("Failed to generate random bytes: %v", err)
-	}
+	rand.Read(b)
 	return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
 }
 
 // TestRandomIPs tests encryption and decryption with random IP addresses.
 func TestRandomIPs(t *testing.T) {
 	key := make([]byte, KeySizeDeterministic)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("Failed to generate random key: %v", err)
-	}
+	rand.Read(key)
 
 	const numTests = 100
 	for i := 0; i < numTests; i++ {
