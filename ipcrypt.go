@@ -275,8 +275,7 @@ func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
 		// Prepare padded_prefix for next iteration
 		// Shift left by 1 bit and insert the next bit from ipBytes
 		paddedPrefix = shiftLeftOneBit(paddedPrefix)
-		bitToInsert := getBit(ipBytes, 127-prefixLenBits)
-		setBit(paddedPrefix, 0, bitToInsert)
+		setBit(paddedPrefix, 0, originalBit)
 	}
 
 	// Return the appropriate format
@@ -374,15 +373,15 @@ func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
 		// Extract the current bit from the encrypted IP
 		currentBitPos := 127 - prefixLenBits
 		encryptedBit := getBit(encryptedBytes, currentBitPos)
+		originalBit := cipherBit ^ encryptedBit
 
 		// Set the bit in the decrypted result
-		setBit(decrypted, currentBitPos, cipherBit^encryptedBit)
+		setBit(decrypted, currentBitPos, originalBit)
 
 		// Prepare padded_prefix for next iteration
 		// Shift left by 1 bit and insert the next bit from decrypted
 		paddedPrefix = shiftLeftOneBit(paddedPrefix)
-		bitToInsert := getBit(decrypted, 127-prefixLenBits)
-		setBit(paddedPrefix, 0, bitToInsert)
+		setBit(paddedPrefix, 0, originalBit)
 	}
 
 	// Return the appropriate format
