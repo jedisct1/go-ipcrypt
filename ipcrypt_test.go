@@ -86,6 +86,44 @@ var testVectors = []testVector{
 		tweak:   "21bd1834bc088cd2b4ecbe30b70898d7",
 		output:  "21bd1834bc088cd2b4ecbe30b70898d76089c7e05ae30c2d10ca149870a263e4",
 	},
+
+	// ipcrypt-pfx test vectors
+	{
+		variant: "ipcrypt-pfx",
+		key:     "0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301",
+		ip:      "0.0.0.0",
+		output:  "151.82.155.134",
+	},
+	{
+		variant: "ipcrypt-pfx",
+		key:     "0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301",
+		ip:      "255.255.255.255",
+		output:  "94.185.169.89",
+	},
+	{
+		variant: "ipcrypt-pfx",
+		key:     "0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301",
+		ip:      "192.0.2.1",
+		output:  "100.115.72.131",
+	},
+	{
+		variant: "ipcrypt-pfx",
+		key:     "0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301",
+		ip:      "2001:db8::1",
+		output:  "c180:5dd4:2587:3524:30ab:fa65:6ab6:f88",
+	},
+	{
+		variant: "ipcrypt-pfx",
+		key:     "0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301",
+		ip:      "2001:db8::2",
+		output:  "c180:5dd4:2587:3524:30ab:fa65:6ab6:f8a",
+	},
+	{
+		variant: "ipcrypt-pfx",
+		key:     "0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301",
+		ip:      "2001:db8:1234:5678:9abc:def0:1234:5678",
+		output:  "c180:5dd4:3f39:5792:2334:a348:e913:4af5",
+	},
 }
 
 // TestReferenceVectors tests all reference vectors for correctness.
@@ -128,6 +166,12 @@ func TestReferenceVectors(t *testing.T) {
 					t.Fatalf("Failed to decode tweak: %v", err)
 				}
 				encrypted, err = EncryptIPNonDeterministicX(ip.String(), key, tweak)
+			case "ipcrypt-pfx":
+				encryptedIP, err := EncryptIPPfx(ip, key)
+				if err != nil {
+					t.Fatalf("Encryption failed: %v", err)
+				}
+				encrypted = encryptedIP
 			}
 			if err != nil {
 				t.Fatalf("Encryption failed: %v", err)
@@ -136,7 +180,7 @@ func TestReferenceVectors(t *testing.T) {
 			// Compare output
 			var got string
 			switch tv.variant {
-			case "ipcrypt-deterministic":
+			case "ipcrypt-deterministic", "ipcrypt-pfx":
 				got = net.IP(encrypted).String()
 			case "ipcrypt-nd", "ipcrypt-ndx":
 				got = hex.EncodeToString(encrypted)
@@ -162,6 +206,8 @@ func TestReferenceVectors(t *testing.T) {
 					t.Fatalf("Decryption failed: %v", err)
 				}
 				decrypted = net.ParseIP(decryptedStr)
+			case "ipcrypt-pfx":
+				decrypted, err = DecryptIPPfx(net.IP(encrypted), key)
 			}
 			if err != nil {
 				t.Fatalf("Decryption failed: %v", err)

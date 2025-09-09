@@ -25,7 +25,7 @@ import (
     "crypto/rand"
     "fmt"
     "net"
-    "github.com/jedisct1/go-ipcrypt/ipcrypt"
+    "github.com/jedisct1/go-ipcrypt"
 )
 
 func main() {
@@ -80,10 +80,28 @@ func main() {
 }
 ```
 
-## Constants
+## API Reference
+
+### Constants
 
 - `KeySizeDeterministic`: 16 bytes (ipcrypt-deterministic)
 - `KeySizeND`: 16 bytes (ipcrypt-nd)
 - `KeySizeNDX`: 32 bytes (ipcrypt-ndx)
 - `TweakSize`: 8 bytes (ipcrypt-nd tweak)
 - `TweakSizeX`: 16 bytes (ipcrypt-ndx tweak)
+
+### Functions
+
+#### Deterministic Mode
+- `EncryptIP(key []byte, ip net.IP) (net.IP, error)` - Encrypts an IP address deterministically
+- `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` - Decrypts an IP address deterministically
+- `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation
+- `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation
+
+#### Non-Deterministic Mode (ipcrypt-nd)
+- `EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 8-byte tweak
+- `DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-nd ciphertext
+
+#### Extended Non-Deterministic Mode (ipcrypt-ndx)
+- `EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 16-byte tweak
+- `DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-ndx ciphertext
