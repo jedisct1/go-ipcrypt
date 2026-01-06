@@ -1,8 +1,9 @@
 // Package ipcrypt implements IP address encryption and obfuscation methods.
-// It provides three encryption modes:
+// It provides four encryption modes:
 //   - ipcrypt-deterministic: A deterministic mode where the same input always produces the same output
 //   - ipcrypt-nd: A non-deterministic mode that uses an 8-byte tweak
 //   - ipcrypt-ndx: An extended non-deterministic mode that uses a 32-byte key and 16-byte tweak
+//   - ipcrypt-pfx: A prefix-preserving mode that maintains the original IP format (IPv4 or IPv6)
 //
 // For non-deterministic modes, passing nil as the tweak parameter will automatically generate a random tweak.
 package ipcrypt
@@ -427,7 +428,7 @@ func shiftLeftOneBit(data []byte) []byte {
 	// Process from least significant byte (byte 15) to most significant (byte 0)
 	for i := 15; i >= 0; i-- {
 		// Current byte shifted left by 1, with carry from previous byte
-		result[i] = ((data[i] << 1) | carry) & 0xFF
+		result[i] = (data[i] << 1) | carry
 		// Extract the bit that will be carried to the next byte
 		carry = (data[i] >> 7) & 1
 	}
