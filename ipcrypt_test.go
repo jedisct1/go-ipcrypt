@@ -500,6 +500,32 @@ func TestRandomIPs(t *testing.T) {
 	}
 }
 
+func TestDecryptIPPfxAcceptsFourByteEncryptedIPv4(t *testing.T) {
+	key, err := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	if err != nil {
+		t.Fatalf("Failed to decode key: %v", err)
+	}
+
+	ip := net.ParseIP("192.0.2.1")
+	if ip == nil {
+		t.Fatal("Failed to parse IP")
+	}
+
+	encrypted, err := EncryptIPPfx(ip, key)
+	if err != nil {
+		t.Fatalf("EncryptIPPfx failed: %v", err)
+	}
+
+	decrypted, err := DecryptIPPfx(encrypted.To4(), key)
+	if err != nil {
+		t.Fatalf("DecryptIPPfx failed for 4-byte encrypted IPv4: %v", err)
+	}
+
+	if !decrypted.Equal(ip) {
+		t.Fatalf("Decryption failed: got %s, want %s", decrypted, ip)
+	}
+}
+
 // TestInvalidInputs tests error handling for invalid inputs.
 func TestInvalidInputs(t *testing.T) {
 	// Test invalid key length

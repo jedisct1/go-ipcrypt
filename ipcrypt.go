@@ -304,23 +304,13 @@ func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
 		return nil, errors.New("the two halves of the key must be different")
 	}
 
-	// Determine if this is IPv4
+	// Keep IPv4 ciphertexts in their IPv4 code path, but normalize them to
+	// the 16-byte IPv4-mapped form before the bitwise decryption loop.
 	isIPv4 := encryptedIP.To4() != nil
 
-	// Convert to 16-byte representation
-	var encryptedBytes []byte
-	if isIPv4 {
-		// Convert IPv4 to IPv4-mapped IPv6 format
-		encryptedBytes = make([]byte, 16)
-		copy(encryptedBytes[:10], []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
-		copy(encryptedBytes[10:12], []byte{0xff, 0xff})
-		copy(encryptedBytes[12:], encryptedIP.To4())
-	} else {
-		var err error
-		encryptedBytes, err = validateIP(encryptedIP)
-		if err != nil {
-			return nil, err
-		}
+	encryptedBytes, err := validateIP(encryptedIP)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create AES cipher objects
