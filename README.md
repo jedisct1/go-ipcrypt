@@ -90,21 +90,60 @@ func main() {
 - `KeySizeNDX`: 32 bytes (ipcrypt-ndx)
 - `TweakSize`: 8 bytes (ipcrypt-nd tweak)
 - `TweakSizeX`: 16 bytes (ipcrypt-ndx tweak)
+- `MaxIPLength`: 16 bytes
+- `NonDeterministicSize`: 24 bytes (`TweakSize + MaxIPLength`)
+- `NonDeterministicXSize`: 32 bytes (`TweakSizeX + MaxIPLength`)
+
+### Types
+
+- `ScratchPad` - reusable scratch buffers to reduce allocations even further using the `ToScratch` APIs across repeated calls
+- `NewScratchPad() *ScratchPad` - creates and initializes a scratch pad
 
 ### Functions
 
 #### Deterministic Mode
 - `EncryptIP(key []byte, ip net.IP) (net.IP, error)` - Encrypts an IP address deterministically
 - `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` - Decrypts an IP address deterministically
+- `EncryptIPTo(key []byte, ip net.IP, encrypted []byte) (net.IP, error)` - Encrypts an IP address deterministically into a preallocated buffer of at least `MaxIPLength` bytes
+- `DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte) (net.IP, error)` - Decrypts an IP address deterministically into a preallocated buffer of at least `MaxIPLength` bytes
 
 #### Prefix-Preserving Mode (ipcrypt-pfx)
 - `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation
 - `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation
+- `EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation into a preallocated buffer of at least `MaxIPLength` bytes
+- `DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation into a preallocated buffer of at least `MaxIPLength` bytes
+- `EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Same as `EncryptIPPfxTo`, but reuses scratch buffers across calls
+- `DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Same as `DecryptIPPfxTo`, but reuses scratch buffers across calls
 
 #### Non-Deterministic Mode (ipcrypt-nd)
 - `EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 8-byte tweak
 - `DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-nd ciphertext
+- `EncryptIPNonDeterministicTo(ip string, key []byte, tweak []byte, encrypted []byte) ([]byte, error)` - Encrypts into a preallocated buffer of at least `NonDeterministicSize` bytes
+- `DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte) (net.IP, error)` - Decrypts into a preallocated buffer of at least `MaxIPLength` bytes
 
 #### Extended Non-Deterministic Mode (ipcrypt-ndx)
 - `EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 16-byte tweak
 - `DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-ndx ciphertext
+- `EncryptIPNonDeterministicXTo(ip string, key []byte, tweak []byte, encrypted []byte) ([]byte, error)` - Encrypts into a preallocated buffer of at least `NonDeterministicXSize` bytes
+- `DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte) (net.IP, error)` - Decrypts into a preallocated buffer of at least `MaxIPLength` bytes
+- `EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Same as `EncryptIPNonDeterministicXTo`, but reuses scratch buffers across calls
+- `DecryptIPNonDeterministicXToScratch(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Same as `DecryptIPNonDeterministicXTo`, but reuses scratch buffers across calls
+
+## Buffer Reuse
+
+The `To` functions write into caller-provided buffers in order to avoid allocating result slices on every call.
+
+For repeated calls in `ipcrypt-pfx` and `ipcrypt-ndx`, the `ToScratch` variants can further reduce allocations by reusing internal temporary buffers:
+
+```go
+scratch := ipcrypt.NewScratchPad()
+buf := make([]byte, ipcrypt.MaxIPLength)
+
+for ip := range ips {
+    encrypted, err := ipcrypt.EncryptIPPfxToScratch(ip, key, buf, scratch)
+    if err != nil {
+        panic(err)
+    }
+	// use buf in some way
+}
+```
