@@ -40,6 +40,12 @@ var testVectors = []testVector{
 		ip:      "192.0.2.1",
 		output:  "1dbd:c1b9:fff1:7586:7d0b:67b4:e76e:4777",
 	},
+	{
+		variant: "ipcrypt-deterministic",
+		key:     "2b7e151628aed2a6abf7158809cf4f3c",
+		ip:      "2001:db8::1",
+		output:  "10ea:8047:d631:d47d:150d:53dc:6ff3:9302",
+	},
 
 	// ipcrypt-nd test vectors
 	{
@@ -526,6 +532,291 @@ func TestDecryptIPPfxAcceptsFourByteEncryptedIPv4(t *testing.T) {
 	}
 }
 
+func TestEncryptIPNonDeterministicTo(t *testing.T) {
+	key, _ := hex.DecodeString("1032547698badcfeefcdab8967452301")
+	tweak, _ := hex.DecodeString("21bd1834bc088cd2")
+
+	buf := make([]byte, NonDeterministicSize)
+	encrypted, err := EncryptIPNonDeterministicTo("192.0.2.1", key, tweak, buf)
+	if err != nil {
+		t.Fatalf("EncryptIPNonDeterministicTo failed: %v", err)
+	}
+
+	if &encrypted[0] != &buf[0] {
+		t.Fatal("EncryptIPNonDeterministicTo did not reuse caller buffer")
+	}
+
+	if got := hex.EncodeToString(encrypted); got != "21bd1834bc088cd2e5e1fe55f95876e639faae2594a0caad" {
+		t.Fatalf("EncryptIPNonDeterministicTo mismatch: got %s", got)
+	}
+
+	if _, err := EncryptIPNonDeterministicTo("192.0.2.1", key, tweak, make([]byte, NonDeterministicSize-1)); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+}
+
+func TestDecryptIPNonDeterministicTo(t *testing.T) {
+	key, _ := hex.DecodeString("1032547698badcfeefcdab8967452301")
+	ciphertext, _ := hex.DecodeString("21bd1834bc088cd2e5e1fe55f95876e639faae2594a0caad")
+
+	buf := make([]byte, MaxIPLength)
+	decrypted, err := DecryptIPNonDeterministicTo(ciphertext, key, buf)
+	if err != nil {
+		t.Fatalf("DecryptIPNonDeterministicTo failed: %v", err)
+	}
+
+	if &decrypted[0] != &buf[0] {
+		t.Fatal("DecryptIPNonDeterministicTo did not reuse caller buffer")
+	}
+
+	if !decrypted.Equal(net.ParseIP("192.0.2.1")) {
+		t.Fatalf("DecryptIPNonDeterministicTo mismatch: got %s", decrypted)
+	}
+
+	if _, err := DecryptIPNonDeterministicTo(ciphertext, key, make([]byte, MaxIPLength-1)); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+}
+
+func TestEncryptIPPfxTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+
+	ipv4Buf := make([]byte, MaxIPLength)
+	encryptedIPv4, err := EncryptIPPfxTo(net.ParseIP("192.0.2.1"), key, ipv4Buf)
+	if err != nil {
+		t.Fatalf("EncryptIPPfxTo IPv4 failed: %v", err)
+	}
+	if &encryptedIPv4[0] != &ipv4Buf[0] {
+		t.Fatal("EncryptIPPfxTo IPv4 did not reuse caller buffer")
+	}
+	if got := encryptedIPv4.String(); got != "100.115.72.131" {
+		t.Fatalf("EncryptIPPfxTo IPv4 mismatch: got %s", got)
+	}
+
+	ipv6Buf := make([]byte, MaxIPLength)
+	encryptedIPv6, err := EncryptIPPfxTo(net.ParseIP("2001:db8::1"), key, ipv6Buf)
+	if err != nil {
+		t.Fatalf("EncryptIPPfxTo IPv6 failed: %v", err)
+	}
+	if &encryptedIPv6[0] != &ipv6Buf[0] {
+		t.Fatal("EncryptIPPfxTo IPv6 did not reuse caller buffer")
+	}
+	if got := encryptedIPv6.String(); got != "c180:5dd4:2587:3524:30ab:fa65:6ab6:f88" {
+		t.Fatalf("EncryptIPPfxTo IPv6 mismatch: got %s", got)
+	}
+
+	if _, err := EncryptIPPfxTo(net.ParseIP("192.0.2.1"), key, make([]byte, MaxIPLength-1)); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected short IPv4 buffer error, got %v", err)
+	}
+	if _, err := EncryptIPPfxTo(net.ParseIP("2001:db8::1"), key, make([]byte, MaxIPLength-1)); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected short IPv6 buffer error, got %v", err)
+	}
+}
+
+func TestDecryptIPPfxTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+
+	ipv4Buf := make([]byte, MaxIPLength)
+	decryptedIPv4, err := DecryptIPPfxTo(net.ParseIP("100.115.72.131").To4(), key, ipv4Buf)
+	if err != nil {
+		t.Fatalf("DecryptIPPfxTo IPv4 failed: %v", err)
+	}
+	if &decryptedIPv4[0] != &ipv4Buf[0] {
+		t.Fatal("DecryptIPPfxTo IPv4 did not reuse caller buffer")
+	}
+	if got := decryptedIPv4.String(); got != "192.0.2.1" {
+		t.Fatalf("DecryptIPPfxTo IPv4 mismatch: got %s", got)
+	}
+
+	ipv6Buf := make([]byte, MaxIPLength)
+	decryptedIPv6, err := DecryptIPPfxTo(net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"), key, ipv6Buf)
+	if err != nil {
+		t.Fatalf("DecryptIPPfxTo IPv6 failed: %v", err)
+	}
+	if &decryptedIPv6[0] != &ipv6Buf[0] {
+		t.Fatal("DecryptIPPfxTo IPv6 did not reuse caller buffer")
+	}
+	if got := decryptedIPv6.String(); got != "2001:db8::1" {
+		t.Fatalf("DecryptIPPfxTo IPv6 mismatch: got %s", got)
+	}
+
+	if _, err := DecryptIPPfxTo(net.ParseIP("100.115.72.131").To4(), key, make([]byte, MaxIPLength-1)); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected short IPv4 buffer error, got %v", err)
+	}
+	if _, err := DecryptIPPfxTo(net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"), key, make([]byte, MaxIPLength-1)); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected short IPv6 buffer error, got %v", err)
+	}
+}
+
+func TestIPPfxScratchPadReuseAcrossCalls(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	scratch := NewScratchPad()
+
+	encryptCases := []struct {
+		ip       string
+		expected string
+	}{
+		{ip: "192.0.2.1", expected: "100.115.72.131"},
+		{ip: "2001:db8::1", expected: "c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"},
+		{ip: "2001:db8::2", expected: "c180:5dd4:2587:3524:30ab:fa65:6ab6:f8a"},
+		{ip: "0.0.0.0", expected: "151.82.155.134"},
+	}
+
+	for _, tc := range encryptCases {
+		buf := make([]byte, MaxIPLength)
+		encrypted, err := EncryptIPPfxToScratch(net.ParseIP(tc.ip), key, buf, scratch)
+		if err != nil {
+			t.Fatalf("EncryptIPPfxToScratch(%s) failed: %v", tc.ip, err)
+		}
+		if &encrypted[0] != &buf[0] {
+			t.Fatalf("EncryptIPPfxToScratch(%s) did not reuse caller buffer", tc.ip)
+		}
+		if got := encrypted.String(); got != tc.expected {
+			t.Fatalf("EncryptIPPfxToScratch(%s) mismatch: got %s, want %s", tc.ip, got, tc.expected)
+		}
+	}
+
+	decryptCases := []struct {
+		ciphertext string
+		expected   string
+	}{
+		{ciphertext: "100.115.72.131", expected: "192.0.2.1"},
+		{ciphertext: "c180:5dd4:2587:3524:30ab:fa65:6ab6:f88", expected: "2001:db8::1"},
+		{ciphertext: "151.82.155.134", expected: "0.0.0.0"},
+	}
+
+	for _, tc := range decryptCases {
+		buf := make([]byte, MaxIPLength)
+		decrypted, err := DecryptIPPfxToScratch(net.ParseIP(tc.ciphertext), key, buf, scratch)
+		if err != nil {
+			t.Fatalf("DecryptIPPfxToScratch(%s) failed: %v", tc.ciphertext, err)
+		}
+		if &decrypted[0] != &buf[0] {
+			t.Fatalf("DecryptIPPfxToScratch(%s) did not reuse caller buffer", tc.ciphertext)
+		}
+		if got := decrypted.String(); got != tc.expected {
+			t.Fatalf("DecryptIPPfxToScratch(%s) mismatch: got %s, want %s", tc.ciphertext, got, tc.expected)
+		}
+	}
+}
+
+func TestEncryptIPNonDeterministicXTo(t *testing.T) {
+	key, _ := hex.DecodeString("1032547698badcfeefcdab89674523010123456789abcdeffedcba9876543210")
+	tweak, _ := hex.DecodeString("08e0c289bff23b7cb4ecbe30b70898d7")
+
+	buf := make([]byte, NonDeterministicXSize)
+	encrypted, err := EncryptIPNonDeterministicXTo("192.0.2.1", key, tweak, buf)
+	if err != nil {
+		t.Fatalf("EncryptIPNonDeterministicXTo failed: %v", err)
+	}
+
+	if &encrypted[0] != &buf[0] {
+		t.Fatal("EncryptIPNonDeterministicXTo did not reuse caller buffer")
+	}
+
+	if got := hex.EncodeToString(encrypted); got != "08e0c289bff23b7cb4ecbe30b70898d7766a533392a69edf1ad0d3ce362ba98a" {
+		t.Fatalf("EncryptIPNonDeterministicXTo mismatch: got %s", got)
+	}
+
+	if _, err := EncryptIPNonDeterministicXTo("192.0.2.1", key, tweak, make([]byte, NonDeterministicXSize-1)); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+}
+
+func TestDecryptIPNonDeterministicXTo(t *testing.T) {
+	key, _ := hex.DecodeString("1032547698badcfeefcdab89674523010123456789abcdeffedcba9876543210")
+	ciphertext, _ := hex.DecodeString("08e0c289bff23b7cb4ecbe30b70898d7766a533392a69edf1ad0d3ce362ba98a")
+
+	buf := make([]byte, MaxIPLength)
+	decrypted, err := DecryptIPNonDeterministicXTo(ciphertext, key, buf)
+	if err != nil {
+		t.Fatalf("DecryptIPNonDeterministicXTo failed: %v", err)
+	}
+
+	if &decrypted[0] != &buf[0] {
+		t.Fatal("DecryptIPNonDeterministicXTo did not reuse caller buffer")
+	}
+
+	if !decrypted.Equal(net.ParseIP("192.0.2.1")) {
+		t.Fatalf("DecryptIPNonDeterministicXTo mismatch: got %s", decrypted)
+	}
+
+	if _, err := DecryptIPNonDeterministicXTo(ciphertext, key, make([]byte, MaxIPLength-1)); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+}
+
+func TestIPNonDeterministicXScratchPadReuseAcrossCalls(t *testing.T) {
+	key1, _ := hex.DecodeString("1032547698badcfeefcdab89674523010123456789abcdeffedcba9876543210")
+	key2, _ := hex.DecodeString("2b7e151628aed2a6abf7158809cf4f3c3c4fcf098815f7aba6d2ae2816157e2b")
+	tweak1, _ := hex.DecodeString("08e0c289bff23b7cb4ecbe30b70898d7")
+	tweak2, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d7")
+	scratch := NewScratchPad()
+
+	encryptCases := []struct {
+		ip       string
+		key      []byte
+		tweak    []byte
+		expected string
+	}{
+		{
+			ip:       "192.0.2.1",
+			key:      key1,
+			tweak:    tweak1,
+			expected: "08e0c289bff23b7cb4ecbe30b70898d7766a533392a69edf1ad0d3ce362ba98a",
+		},
+		{
+			ip:       "2001:db8::1",
+			key:      key2,
+			tweak:    tweak2,
+			expected: "21bd1834bc088cd2b4ecbe30b70898d76089c7e05ae30c2d10ca149870a263e4",
+		},
+	}
+
+	ciphertexts := make([][]byte, 0, len(encryptCases))
+	for _, tc := range encryptCases {
+		buf := make([]byte, NonDeterministicXSize)
+		encrypted, err := EncryptIPNonDeterministicXToScratch(tc.ip, tc.key, tc.tweak, buf, scratch)
+		if err != nil {
+			t.Fatalf("EncryptIPNonDeterministicXToScratch(%s) failed: %v", tc.ip, err)
+		}
+		if &encrypted[0] != &buf[0] {
+			t.Fatalf("EncryptIPNonDeterministicXToScratch(%s) did not reuse caller buffer", tc.ip)
+		}
+		if got := hex.EncodeToString(encrypted); got != tc.expected {
+			t.Fatalf("EncryptIPNonDeterministicXToScratch(%s) mismatch: got %s, want %s", tc.ip, got, tc.expected)
+		}
+
+		stableCopy := make([]byte, len(encrypted))
+		copy(stableCopy, encrypted)
+		ciphertexts = append(ciphertexts, stableCopy)
+	}
+
+	decryptCases := []struct {
+		ciphertext []byte
+		key        []byte
+		expected   string
+	}{
+		{ciphertext: ciphertexts[0], key: key1, expected: "192.0.2.1"},
+		{ciphertext: ciphertexts[1], key: key2, expected: "2001:db8::1"},
+		{ciphertext: ciphertexts[0], key: key1, expected: "192.0.2.1"},
+	}
+
+	for _, tc := range decryptCases {
+		buf := make([]byte, MaxIPLength)
+		decrypted, err := DecryptIPNonDeterministicXToScratch(tc.ciphertext, tc.key, buf, scratch)
+		if err != nil {
+			t.Fatalf("DecryptIPNonDeterministicXToScratch failed: %v", err)
+		}
+		if &decrypted[0] != &buf[0] {
+			t.Fatal("DecryptIPNonDeterministicXToScratch did not reuse caller buffer")
+		}
+		if got := decrypted.String(); got != tc.expected {
+			t.Fatalf("DecryptIPNonDeterministicXToScratch mismatch: got %s, want %s", got, tc.expected)
+		}
+	}
+}
+
 // TestInvalidInputs tests error handling for invalid inputs.
 func TestInvalidInputs(t *testing.T) {
 	// Test invalid key length
@@ -551,4 +842,423 @@ func TestInvalidInputs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid ciphertext length") {
 		t.Errorf("Expected invalid ciphertext length error, got %v", err)
 	}
+}
+
+var (
+	benchmarkIPSink     net.IP
+	benchmarkBytesSink  []byte
+	benchmarkStringSink string
+)
+
+type benchmarkVectorCase struct {
+	name       string
+	key        []byte
+	tweak      []byte
+	ip         net.IP
+	ipString   string
+	cipherIP   net.IP
+	ciphertext []byte
+}
+
+func BenchmarkAllocations(b *testing.B) {
+	deterministicCases := benchmarkCasesFromTestVectors(b, "ipcrypt-deterministic")
+	ndCases := benchmarkCasesFromTestVectors(b, "ipcrypt-nd")
+	ndxCases := benchmarkCasesFromTestVectors(b, "ipcrypt-ndx")
+	pfxCases := benchmarkCasesFromTestVectors(b, "ipcrypt-pfx")
+
+	b.Run("DeterministicEncrypt", func(b *testing.B) {
+		for _, tc := range deterministicCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					ip, err := EncryptIP(tc.key, tc.ip)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = ip
+				}
+			})
+		}
+	})
+
+	b.Run("DeterministicEncryptTo", func(b *testing.B) {
+		for _, tc := range deterministicCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				b.ReportAllocs()
+				for b.Loop() {
+					ip, err := EncryptIPTo(tc.key, tc.ip, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = ip
+				}
+			})
+		}
+	})
+
+	b.Run("DeterministicDecrypt", func(b *testing.B) {
+		for _, tc := range deterministicCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					ip, err := DecryptIP(tc.key, tc.cipherIP)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = ip
+				}
+			})
+		}
+	})
+
+	b.Run("DeterministicDecryptTo", func(b *testing.B) {
+		for _, tc := range deterministicCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				b.ReportAllocs()
+				for b.Loop() {
+					ip, err := DecryptIPTo(tc.key, tc.cipherIP, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = ip
+				}
+			})
+		}
+	})
+
+	b.Run("NDEncrypt", func(b *testing.B) {
+		for _, tc := range ndCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPNonDeterministic(tc.ipString, tc.key, tc.tweak)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkBytesSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDEncryptTo", func(b *testing.B) {
+		for _, tc := range ndCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, NonDeterministicSize)
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPNonDeterministicTo(tc.ipString, tc.key, tc.tweak, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkBytesSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDDecrypt", func(b *testing.B) {
+		for _, tc := range ndCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPNonDeterministic(tc.ciphertext, tc.key)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkStringSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDDecryptTo", func(b *testing.B) {
+		for _, tc := range ndCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPNonDeterministicTo(tc.ciphertext, tc.key, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDXEncrypt", func(b *testing.B) {
+		for _, tc := range ndxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPNonDeterministicX(tc.ipString, tc.key, tc.tweak)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkBytesSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDXEncryptTo", func(b *testing.B) {
+		for _, tc := range ndxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, NonDeterministicXSize)
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPNonDeterministicXTo(tc.ipString, tc.key, tc.tweak, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkBytesSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDXEncryptToScratch", func(b *testing.B) {
+		for _, tc := range ndxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, NonDeterministicXSize)
+				scratch := NewScratchPad()
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPNonDeterministicXToScratch(tc.ipString, tc.key, tc.tweak, buf, scratch)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkBytesSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDXDecrypt", func(b *testing.B) {
+		for _, tc := range ndxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPNonDeterministicX(tc.ciphertext, tc.key)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkStringSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDXDecryptTo", func(b *testing.B) {
+		for _, tc := range ndxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPNonDeterministicXTo(tc.ciphertext, tc.key, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("NDXDecryptToScratch", func(b *testing.B) {
+		for _, tc := range ndxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				scratch := NewScratchPad()
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPNonDeterministicXToScratch(tc.ciphertext, tc.key, buf, scratch)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("PFXEncrypt", func(b *testing.B) {
+		for _, tc := range pfxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPPfx(tc.ip, tc.key)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("PFXEncryptTo", func(b *testing.B) {
+		for _, tc := range pfxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPPfxTo(tc.ip, tc.key, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("PFXEncryptToScratch", func(b *testing.B) {
+		for _, tc := range pfxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				scratch := NewScratchPad()
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := EncryptIPPfxToScratch(tc.ip, tc.key, buf, scratch)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("PFXDecrypt", func(b *testing.B) {
+		for _, tc := range pfxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPPfx(tc.cipherIP, tc.key)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("PFXDecryptTo", func(b *testing.B) {
+		for _, tc := range pfxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPPfxTo(tc.cipherIP, tc.key, buf)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+
+	b.Run("PFXDecryptToScratch", func(b *testing.B) {
+		for _, tc := range pfxCases {
+			b.Run(tc.name, func(b *testing.B) {
+				buf := make([]byte, MaxIPLength)
+				scratch := NewScratchPad()
+				b.ReportAllocs()
+				for b.Loop() {
+					out, err := DecryptIPPfxToScratch(tc.cipherIP, tc.key, buf, scratch)
+					if err != nil {
+						b.Fatal(err)
+					}
+					benchmarkIPSink = out
+				}
+			})
+		}
+	})
+}
+
+func benchmarkCasesFromTestVectors(b *testing.B, variant string) []benchmarkVectorCase {
+	b.Helper()
+
+	var cases []benchmarkVectorCase
+	haveIPv4 := false
+	haveIPv6 := false
+
+	for _, tv := range testVectors {
+		if tv.variant != variant {
+			continue
+		}
+
+		ip := net.ParseIP(tv.ip)
+		if ip == nil {
+			b.Fatalf("invalid benchmark IP in test vector: %s", tv.ip)
+		}
+
+		isIPv4 := ip.To4() != nil
+		if isIPv4 && haveIPv4 {
+			continue
+		}
+		if !isIPv4 && haveIPv6 {
+			continue
+		}
+
+		key, err := hex.DecodeString(tv.key)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		tc := benchmarkVectorCase{
+			name:     ipFamilyName(ip),
+			key:      key,
+			ip:       ip,
+			ipString: tv.ip,
+		}
+
+		if tv.tweak != "" {
+			tc.tweak, err = hex.DecodeString(tv.tweak)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		switch variant {
+		case "ipcrypt-deterministic", "ipcrypt-pfx":
+			tc.cipherIP = net.ParseIP(tv.output)
+			if tc.cipherIP == nil {
+				b.Fatalf("invalid benchmark ciphertext IP in test vector: %s", tv.output)
+			}
+		case "ipcrypt-nd", "ipcrypt-ndx":
+			tc.ciphertext, err = hex.DecodeString(tv.output)
+			if err != nil {
+				b.Fatal(err)
+			}
+		default:
+			b.Fatalf("unsupported benchmark variant: %s", variant)
+		}
+
+		cases = append(cases, tc)
+		if isIPv4 {
+			haveIPv4 = true
+		} else {
+			haveIPv6 = true
+		}
+	}
+
+	if len(cases) == 0 {
+		b.Fatalf("no benchmark cases found for variant %s", variant)
+	}
+	return cases
+}
+
+func ipFamilyName(ip net.IP) string {
+	if ip.To4() != nil {
+		return "IPv4"
+	}
+	return "IPv6"
 }
