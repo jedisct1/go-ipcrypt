@@ -90,13 +90,13 @@ func main() {
 - `KeySizeNDX`: 32 bytes (ipcrypt-ndx)
 - `TweakSize`: 8 bytes (ipcrypt-nd tweak)
 - `TweakSizeX`: 16 bytes (ipcrypt-ndx tweak)
-- `MaxIPLength`: 16 bytes
-- `NonDeterministicSize`: 24 bytes (`TweakSize + MaxIPLength`)
-- `NonDeterministicXSize`: 32 bytes (`TweakSizeX + MaxIPLength`)
+- `MaxIPSize`: 16 bytes
+- `NonDeterministicSize`: 24 bytes (`TweakSize + MaxIPSize`)
+- `NonDeterministicXSize`: 32 bytes (`TweakSizeX + MaxIPSize`)
 
 ### Types
 
-- `ScratchPad` - reusable scratch buffers to reduce allocations even further using the `ToScratch` APIs across repeated calls
+- `ScratchPad` - reusable scratch buffers and cached internal state for the zero-allocation `To` APIs across repeated calls
 - `NewScratchPad() *ScratchPad` - creates and initializes a scratch pad
 
 ### Functions
@@ -104,46 +104,90 @@ func main() {
 #### Deterministic Mode
 - `EncryptIP(key []byte, ip net.IP) (net.IP, error)` - Encrypts an IP address deterministically
 - `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` - Decrypts an IP address deterministically
-- `EncryptIPTo(key []byte, ip net.IP, encrypted []byte) (net.IP, error)` - Encrypts an IP address deterministically into a preallocated buffer of at least `MaxIPLength` bytes
-- `DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte) (net.IP, error)` - Decrypts an IP address deterministically into a preallocated buffer of at least `MaxIPLength` bytes
+- `EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic encryption into a preallocated buffer of at least `MaxIPSize` bytes
+- `DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic decryption into a preallocated buffer of at least `MaxIPSize` bytes
 
 #### Prefix-Preserving Mode (ipcrypt-pfx)
 - `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation
 - `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation
-- `EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation into a preallocated buffer of at least `MaxIPLength` bytes
-- `DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation into a preallocated buffer of at least `MaxIPLength` bytes
-- `EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Same as `EncryptIPPfxTo`, but reuses scratch buffers across calls
-- `DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Same as `DecryptIPPfxTo`, but reuses scratch buffers across calls
+- `EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving encryption into a preallocated buffer of at least `MaxIPSize` bytes
+- `DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving decryption into a preallocated buffer of at least `MaxIPSize` bytes
 
 #### Non-Deterministic Mode (ipcrypt-nd)
 - `EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 8-byte tweak
 - `DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-nd ciphertext
-- `EncryptIPNonDeterministicTo(ip string, key []byte, tweak []byte, encrypted []byte) ([]byte, error)` - Encrypts into a preallocated buffer of at least `NonDeterministicSize` bytes
-- `DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte) (net.IP, error)` - Decrypts into a preallocated buffer of at least `MaxIPLength` bytes
+- `EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Zero-allocation encryption into a preallocated buffer of at least `NonDeterministicSize` bytes
+- `DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation decryption into a preallocated buffer of at least `MaxIPSize` bytes
 
 #### Extended Non-Deterministic Mode (ipcrypt-ndx)
 - `EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 16-byte tweak
 - `DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-ndx ciphertext
-- `EncryptIPNonDeterministicXTo(ip string, key []byte, tweak []byte, encrypted []byte) ([]byte, error)` - Encrypts into a preallocated buffer of at least `NonDeterministicXSize` bytes
-- `DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte) (net.IP, error)` - Decrypts into a preallocated buffer of at least `MaxIPLength` bytes
-- `EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Same as `EncryptIPNonDeterministicXTo`, but reuses scratch buffers across calls
-- `DecryptIPNonDeterministicXToScratch(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Same as `DecryptIPNonDeterministicXTo`, but reuses scratch buffers across calls
+- `EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Zero-allocation encryption into a preallocated buffer of at least `NonDeterministicXSize` bytes
+- `DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation decryption into a preallocated buffer of at least `MaxIPSize` bytes
 
-## Buffer Reuse
+## Zero-Allocation Usage
 
-The `To` functions write into caller-provided buffers in order to avoid allocating result slices on every call.
-
-For repeated calls in `ipcrypt-pfx` and `ipcrypt-ndx`, the `ToScratch` variants can further reduce allocations by reusing internal temporary buffers:
+The `To` functions write into caller-provided buffers and take a reusable `ScratchPad`. Reusing both across calls gives you zero-allocation behaviour.
 
 ```go
 scratch := ipcrypt.NewScratchPad()
-buf := make([]byte, ipcrypt.MaxIPLength)
+buf := make([]byte, ipcrypt.MaxIPSize)
 
 for ip := range ips {
-    encrypted, err := ipcrypt.EncryptIPPfxToScratch(ip, key, buf, scratch)
+    encrypted, err := ipcrypt.EncryptIPPfxTo(ip, key, buf, scratch)
     if err != nil {
         panic(err)
     }
 	// use buf in some way
 }
+```
+
+Note that the scratch pad must be initialized before use. _Also, you cannot reuse the same scratch pad across different keys._
+
+## Performance
+
+Depending on the mode, using the `To` functions can be almost an order of magnitude faster (deterministic and ndx modes) 
+if you are performing multiple conversions using the same scratch pad. The `To` functions save around 100+ns per conversion
+on a M4 Mac, so the difference is less noticeable for the `nd` and `pfx` modes, which are slower (particularly 
+encrypting/decrypting IPV6 addresses in `pfx` mode and descrypting addresses in `nd` mode).
+
+Running `go test -bench BenchmarkAllocations -benchmem` will give you benchmark results for each of the modes and API
+calls, for example:
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/jedisct1/go-ipcrypt
+cpu: Apple M4
+BenchmarkAllocations/DeterministicEncrypt/IPv4-10    	 9683328	       104.4 ns/op	     528 B/op	       2 allocs/op
+BenchmarkAllocations/DeterministicEncrypt/IPv6-10    	11758062	       101.9 ns/op	     528 B/op	       2 allocs/op
+BenchmarkAllocations/DeterministicEncryptTo/IPv4-10  	96331054	        12.76 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/DeterministicEncryptTo/IPv6-10  	96211665	        12.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/DeterministicDecrypt/IPv4-10    	11532612	       102.8 ns/op	     528 B/op	       2 allocs/op
+BenchmarkAllocations/DeterministicDecrypt/IPv6-10    	11747846	       103.4 ns/op	     528 B/op	       2 allocs/op
+BenchmarkAllocations/DeterministicDecryptTo/IPv4-10  	96473685	        12.78 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/DeterministicDecryptTo/IPv6-10  	94559234	        12.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDEncrypt/IPv4-10               	 4494896	       264.9 ns/op	      24 B/op	       1 allocs/op
+BenchmarkAllocations/NDEncrypt/IPv6-10               	 4378069	       271.8 ns/op	      24 B/op	       1 allocs/op
+BenchmarkAllocations/NDEncryptTo/IPv4-10             	 6718228	       179.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDEncryptTo/IPv6-10             	 6710262	       179.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDDecrypt/IPv4-10               	  530713	      2268 ns/op	       8 B/op	       1 allocs/op
+BenchmarkAllocations/NDDecrypt/IPv6-10               	  533724	      2294 ns/op	      16 B/op	       1 allocs/op
+BenchmarkAllocations/NDDecryptTo/IPv4-10             	  562756	      2183 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDDecryptTo/IPv6-10             	  547240	      2178 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDXEncrypt/IPv4-10              	 4906118	       244.0 ns/op	    1568 B/op	       4 allocs/op
+BenchmarkAllocations/NDXEncrypt/IPv6-10              	 4745586	       253.5 ns/op	    1568 B/op	       4 allocs/op
+BenchmarkAllocations/NDXEncryptTo/IPv4-10            	36069930	        33.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDXEncryptTo/IPv6-10            	36468759	        33.34 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDXDecrypt/IPv4-10              	 4810798	       248.5 ns/op	    1560 B/op	       5 allocs/op
+BenchmarkAllocations/NDXDecrypt/IPv6-10              	 4426274	       266.8 ns/op	    1568 B/op	       5 allocs/op
+BenchmarkAllocations/NDXDecryptTo/IPv4-10            	40063990	        29.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/NDXDecryptTo/IPv6-10            	40379679	        30.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/PFXEncrypt/IPv4-10              	 1335013	       897.1 ns/op	    1552 B/op	       4 allocs/op
+BenchmarkAllocations/PFXEncrypt/IPv6-10              	  386245	      3112 ns/op	    1552 B/op	       4 allocs/op
+BenchmarkAllocations/PFXEncryptTo/IPv4-10            	 1614217	       744.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/PFXEncryptTo/IPv6-10            	  403288	      3010 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/PFXDecrypt/IPv4-10              	 1626735	       735.7 ns/op	    1552 B/op	       4 allocs/op
+BenchmarkAllocations/PFXDecrypt/IPv6-10              	  499734	      2430 ns/op	    1552 B/op	       4 allocs/op
+BenchmarkAllocations/PFXDecryptTo/IPv4-10            	 2117570	       569.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAllocations/PFXDecryptTo/IPv6-10            	  507560	      2363 ns/op	       0 B/op	       0 allocs/op
 ```

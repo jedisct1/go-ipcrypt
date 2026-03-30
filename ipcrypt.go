@@ -10,6 +10,7 @@ package ipcrypt
 
 import (
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/subtle"
 	"errors"
@@ -32,14 +33,15 @@ const (
 
 // Max length of an encrypted or decrypted IP address
 const (
-	MaxIPLength           = 16 // Maximum length of an encrypted IP address in bytes
-	NonDeterministicSize  = TweakSize + MaxIPLength
-	NonDeterministicXSize = TweakSizeX + MaxIPLength
+	MaxIPSize             = 16 // Maximum size of an encrypted IP address in bytes
+	MaxScratchSize        = 16 // Maximum scratch buffer size in bytes
+	NonDeterministicSize  = TweakSize + MaxIPSize
+	NonDeterministicXSize = TweakSizeX + MaxIPSize
 )
 
 var (
-	pfxIPv4PaddedPrefix = [MaxIPLength]byte{3: 0x01, 14: 0xFF, 15: 0xFF}
-	pfxIPv6PaddedPrefix = [MaxIPLength]byte{15: 0x01}
+	pfxIPv4PaddedPrefix = [MaxIPSize]byte{3: 0x01, 14: 0xFF, 15: 0xFF}
+	pfxIPv6PaddedPrefix = [MaxIPSize]byte{15: 0x01}
 )
 
 // Error definitions for the package
@@ -51,40 +53,95 @@ var (
 
 // ScratchPad enables reuse of byte slices during encryption and decryption operations to avoid allocations
 type ScratchPad struct {
-	Scratch1 []byte
-	Scratch2 []byte
-	Scratch3 []byte
-	Scratch4 []byte
-}
+	Scratch1 [MaxScratchSize]byte
+	Scratch2 [MaxScratchSize]byte
+	Scratch3 [MaxScratchSize]byte
+	Scratch4 [MaxScratchSize]byte
 
-// init initializes the scratchpad with empty byte slices of the appropriate size if necessary
-func (s *ScratchPad) init() {
-	if s.Scratch1 == nil {
-		s.Scratch1 = make([]byte, MaxIPLength)
-	}
-	if s.Scratch2 == nil {
-		s.Scratch2 = make([]byte, MaxIPLength)
-	}
-	if s.Scratch3 == nil {
-		s.Scratch3 = make([]byte, MaxIPLength)
-	}
-	if s.Scratch4 == nil {
-		s.Scratch4 = make([]byte, MaxIPLength)
-	}
+	keySlot1 [aes.BlockSize]byte
+	keySlot2 [aes.BlockSize]byte
+
+	blockSlot1 cipher.Block
+	blockSlot2 cipher.Block
+
+	// The saved key slots start as all-zero bytes, so an all-zero key would be
+	// indistinguishable from the zero value without an explicit readiness bit.
+	blockSlot1Ready bool
+	blockSlot2Ready bool
+
+	roundKeys1 [11][16]byte
+	roundKeys2 [11][16]byte
+	// The cached round key arrays also have a meaningful all-zero zero value, so
+	// a separate readiness bit is required before relying on key equality.
+	roundKeys1Ready bool
+	roundKeys2Ready bool
 }
 
 func getScratchPad(scratch *ScratchPad) *ScratchPad {
 	if scratch == nil {
 		return NewScratchPad()
 	}
-	scratch.init()
 	return scratch
 }
 
+func (s *ScratchPad) getAESBlock(slot int, key []byte) (cipher.Block, error) {
+	if len(key) != aes.BlockSize {
+		return nil, fmt.Errorf("%w: got %d bytes, want %d bytes", ErrInvalidKeySize, len(key), aes.BlockSize)
+	}
+
+	switch slot {
+	case 1:
+		if s.blockSlot1Ready && subtle.ConstantTimeCompare(s.keySlot1[:], key) == 1 {
+			return s.blockSlot1, nil
+		}
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return nil, err
+		}
+		copy(s.keySlot1[:], key)
+		s.blockSlot1 = block
+		s.blockSlot1Ready = true
+		return block, nil
+	case 2:
+		if s.blockSlot2Ready && subtle.ConstantTimeCompare(s.keySlot2[:], key) == 1 {
+			return s.blockSlot2, nil
+		}
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return nil, err
+		}
+		copy(s.keySlot2[:], key)
+		s.blockSlot2 = block
+		s.blockSlot2Ready = true
+		return block, nil
+	default:
+		return nil, errors.New("invalid AES block slot")
+	}
+}
+
+func (s *ScratchPad) getRoundKeys(slot int, key []byte) *[11][16]byte {
+	switch slot {
+	case 1:
+		if !s.roundKeys1Ready || subtle.ConstantTimeCompare(s.keySlot1[:], key) != 1 {
+			expandKeyTo(key, &s.roundKeys1)
+			copy(s.keySlot1[:], key)
+			s.roundKeys1Ready = true
+		}
+		return &s.roundKeys1
+	case 2:
+		if !s.roundKeys2Ready || subtle.ConstantTimeCompare(s.keySlot2[:], key) != 1 {
+			expandKeyTo(key, &s.roundKeys2)
+			copy(s.keySlot2[:], key)
+			s.roundKeys2Ready = true
+		}
+		return &s.roundKeys2
+	default:
+		panic("invalid round key slot")
+	}
+}
+
 func NewScratchPad() *ScratchPad {
-	s := ScratchPad{}
-	s.init()
-	return &s
+	return &ScratchPad{}
 }
 
 // Utility functions
@@ -142,16 +199,17 @@ func validateOutputLength(buf []byte, expectedSize int, parameterName string) er
 
 // Deterministic mode functions
 
-// EncryptIP encrypts an IP address using ipcrypt-deterministic mode.
+// EncryptIPTo EncryptIP encrypts an IP address using ipcrypt-deterministic mode.
 // The key must be exactly KeySizeDeterministic bytes long.
-// The encrypted parameter must be a byte slice of minimum MaxIPLength bytes long
+// The encrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the encrypted IP address as a net.IP.
-func EncryptIPTo(key []byte, ip net.IP, encrypted []byte) (net.IP, error) {
+func EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if err := validateKey(key, KeySizeDeterministic); err != nil {
 		return nil, err
 	}
 
-	if err := validateOutputLength(encrypted, MaxIPLength, "encrypted"); err != nil {
+	if err := validateOutputLength(encrypted, MaxIPSize, "encrypted"); err != nil {
 		return nil, err
 	}
 
@@ -160,7 +218,8 @@ func EncryptIPTo(key []byte, ip net.IP, encrypted []byte) (net.IP, error) {
 		return nil, err
 	}
 
-	block, err := aes.NewCipher(key)
+	scratch = getScratchPad(scratch)
+	block, err := scratch.getAESBlock(1, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
@@ -175,19 +234,20 @@ func EncryptIPTo(key []byte, ip net.IP, encrypted []byte) (net.IP, error) {
 // Returns the encrypted IP address as a net.IP.
 func EncryptIP(key []byte, ip net.IP) (net.IP, error) {
 	encrypted := make([]byte, 16)
-	return EncryptIPTo(key, ip, encrypted)
+	return EncryptIPTo(key, ip, encrypted, nil)
 }
 
-// DecryptIP decrypts an IP address that was encrypted using ipcrypt-deterministic mode.
+// DecryptIPTo DecryptIP decrypts an IP address that was encrypted using ipcrypt-deterministic mode.
 // The key must be exactly KeySizeDeterministic bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPLength bytes long
+// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the decrypted IP address as a net.IP.
-func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte) (net.IP, error) {
+func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if err := validateKey(key, KeySizeDeterministic); err != nil {
 		return nil, err
 	}
 
-	if err := validateOutputLength(decrypted, MaxIPLength, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
 		return nil, err
 	}
 
@@ -196,7 +256,8 @@ func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte) (net.IP, error)
 		return nil, err
 	}
 
-	block, err := aes.NewCipher(key)
+	scratch = getScratchPad(scratch)
+	block, err := scratch.getAESBlock(1, key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
@@ -211,17 +272,18 @@ func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte) (net.IP, error)
 // Returns the decrypted IP address as a net.IP.
 func DecryptIP(key []byte, encrypted net.IP) (net.IP, error) {
 	decrypted := make([]byte, 16)
-	return DecryptIPTo(key, encrypted, decrypted)
+	return DecryptIPTo(key, encrypted, decrypted, nil)
 }
 
 // Non-deterministic mode functions
 
-// EncryptIPNonDeterministic encrypts an IP address using ipcrypt-nd mode.
+// EncryptIPNonDeterministicTo EncryptIPNonDeterministic encrypts an IP address using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
 // If tweak is nil, a random tweak will be generated.
 // The encrypted parameter must be a byte slice of minimum NonDeterministicSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns a byte slice containing the tweak concatenated with the encrypted IP.
-func EncryptIPNonDeterministicTo(ip string, key []byte, tweak []byte, encrypted []byte) ([]byte, error) {
+func EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error) {
 	if err := validateKey(key, KeySizeND); err != nil {
 		return nil, err
 	}
@@ -230,10 +292,11 @@ func EncryptIPNonDeterministicTo(ip string, key []byte, tweak []byte, encrypted 
 		return nil, err
 	}
 
-	ipBytes, err := validateIP(net.ParseIP(ip))
+	ipBytes, err := validateIP(ip)
 	if err != nil {
 		return nil, err
 	}
+	scratch = getScratchPad(scratch)
 
 	var t []byte
 	if tweak == nil {
@@ -249,12 +312,10 @@ func EncryptIPNonDeterministicTo(ip string, key []byte, tweak []byte, encrypted 
 		copy(encrypted[:TweakSize], t)
 	}
 
-	ciphertext, err := KiasuBCEncrypt(key, t, ipBytes)
-	if err != nil {
+	roundKeys := scratch.getRoundKeys(1, key)
+	if err := kiasuBCEncryptTo(roundKeys, t, ipBytes, encrypted[TweakSize:], scratch.Scratch1[:]); err != nil {
 		return nil, err
 	}
-
-	copy(encrypted[TweakSize:], ciphertext)
 	return encrypted[:NonDeterministicSize], nil
 }
 
@@ -264,14 +325,15 @@ func EncryptIPNonDeterministicTo(ip string, key []byte, tweak []byte, encrypted 
 // Returns a byte slice containing the tweak concatenated with the encrypted IP.
 func EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error) {
 	encrypted := make([]byte, NonDeterministicSize)
-	return EncryptIPNonDeterministicTo(ip, key, tweak, encrypted)
+	return EncryptIPNonDeterministicTo(net.ParseIP(ip), key, tweak, encrypted, nil)
 }
 
 // DecryptIPNonDeterministicTo decrypts an IP address that was encrypted using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
+// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the decrypted IP address as a net.IP.
-func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte) (net.IP, error) {
+func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if err := validateKey(key, KeySizeND); err != nil {
 		return nil, err
 	}
@@ -280,28 +342,27 @@ func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte
 		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), NonDeterministicSize)
 	}
 
-	if err := validateOutputLength(decrypted, MaxIPLength, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
 		return nil, err
 	}
+	scratch = getScratchPad(scratch)
 
 	tweak := ciphertext[:TweakSize]
 	encryptedIP := ciphertext[TweakSize:]
 
-	plainIP, err := KiasuBCDecrypt(key, tweak, encryptedIP)
-	if err != nil {
+	roundKeys := scratch.getRoundKeys(1, key)
+	if err := kiasuBCDecryptTo(roundKeys, tweak, encryptedIP, decrypted, scratch.Scratch1[:]); err != nil {
 		return nil, err
 	}
-
-	copy(decrypted, plainIP)
-	return net.IP(decrypted[:MaxIPLength]), nil
+	return net.IP(decrypted[:MaxIPSize]), nil
 }
 
 // DecryptIPNonDeterministic decrypts an IP address that was encrypted using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
 // Returns the decrypted IP address as a string.
 func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
-	decrypted := make([]byte, MaxIPLength)
-	ip, err := DecryptIPNonDeterministicTo(ciphertext, key, decrypted)
+	decrypted := make([]byte, MaxIPSize)
+	ip, err := DecryptIPNonDeterministicTo(ciphertext, key, decrypted, nil)
 	if err != nil {
 		return "", err
 	}
@@ -313,17 +374,10 @@ func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
 
 // EncryptIPPfxTo encrypts an IP address using ipcrypt-pfx mode.
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
-// The encrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
+// The encrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the encrypted IP address in 16-byte form.
-func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte) (net.IP, error) {
-	return EncryptIPPfxToScratch(ip, key, encrypted, nil)
-}
-
-// EncryptIPPfxToScratch encrypts an IP address using ipcrypt-pfx mode using the provided scratchpad to avoid allocations.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
-// The encrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
-// Returns the encrypted IP address in 16-byte form.
-func EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error) {
+func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
 	}
@@ -343,25 +397,26 @@ func EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *Scr
 		return nil, err
 	}
 
+	scratch = getScratchPad(scratch)
+
 	// Create AES cipher objects
-	cipher1, err := aes.NewCipher(k1)
+	cipher1, err := scratch.getAESBlock(1, k1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create first cipher: %w", err)
 	}
 
-	cipher2, err := aes.NewCipher(k2)
+	cipher2, err := scratch.getAESBlock(2, k2)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
 
 	// Determine if this is IPv4
 	isIPv4 := ip.To4() != nil
-	if err := validateOutputLength(encrypted, MaxIPLength, "encrypted"); err != nil {
+	if err := validateOutputLength(encrypted, MaxIPSize, "encrypted"); err != nil {
 		return nil, err
 	}
-	scratch = getScratchPad(scratch)
 
-	encrypted = encrypted[:MaxIPLength]
+	encrypted = encrypted[:MaxIPSize]
 
 	// Determine starting point
 	prefixStart := 0
@@ -372,7 +427,7 @@ func EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *Scr
 	}
 
 	// Initialize padded prefix for the starting prefix length
-	paddedPrefix := scratch.Scratch1[:MaxIPLength]
+	paddedPrefix := scratch.Scratch1[:]
 	if isIPv4 {
 		copy(paddedPrefix, pfxIPv4PaddedPrefix[:])
 	} else {
@@ -382,14 +437,14 @@ func EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *Scr
 	// Process each bit position
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
 		// Compute pseudorandom function with dual AES encryption
-		e1 := scratch.Scratch2[:MaxIPLength]
+		e1 := scratch.Scratch2[:]
 		cipher1.Encrypt(e1, paddedPrefix)
 
-		e2 := scratch.Scratch3[:MaxIPLength]
+		e2 := scratch.Scratch3[:]
 		cipher2.Encrypt(e2, paddedPrefix)
 
 		// XOR the two encryptions
-		e := xorBytesTo(e1, e2, scratch.Scratch4[:MaxIPLength])
+		e := xorBytesTo(e1, e2, scratch.Scratch4[:])
 		// We only need the least significant bit
 		cipherBit := e[15] & 1
 
@@ -413,23 +468,16 @@ func EncryptIPPfxToScratch(ip net.IP, key []byte, encrypted []byte, scratch *Scr
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
 // Returns the encrypted IP address maintaining the original format (IPv4 or IPv6).
 func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
-	encrypted := make([]byte, MaxIPLength)
-	return EncryptIPPfxTo(ip, key, encrypted)
+	encrypted := make([]byte, MaxIPSize)
+	return EncryptIPPfxTo(ip, key, encrypted, nil)
 }
 
 // DecryptIPPfxTo decrypts an IP address that was encrypted using ipcrypt-pfx mode.
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
-// The decrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
-// Returns the decrypted IP address
-func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte) (net.IP, error) {
-	return DecryptIPPfxToScratch(encryptedIP, key, decrypted, nil)
-}
-
-// DecryptIPPfxToScratch decrypts an IP address that was encrypted using ipcrypt-pfx mode using the provided scratchpad to avoid allocations.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
-// The decrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
-// Returns the decrypted IP address
-func DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
+// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
+// Returns the decrypted IP address.
+func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
 	}
@@ -446,7 +494,7 @@ func DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scr
 	// Keep IPv4 ciphertexts in their IPv4 code path, but normalize them to
 	// the 16-byte IPv4-mapped form before the bitwise decryption loop.
 	isIPv4 := encryptedIP.To4() != nil
-	if err := validateOutputLength(decrypted, MaxIPLength, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
 		return nil, err
 	}
 	scratch = getScratchPad(scratch)
@@ -457,17 +505,17 @@ func DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scr
 	}
 
 	// Create AES cipher objects
-	cipher1, err := aes.NewCipher(k1)
+	cipher1, err := scratch.getAESBlock(1, k1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create first cipher: %w", err)
 	}
 
-	cipher2, err := aes.NewCipher(k2)
+	cipher2, err := scratch.getAESBlock(2, k2)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
 
-	decrypted = decrypted[:MaxIPLength]
+	decrypted = decrypted[:MaxIPSize]
 
 	// Determine starting point
 	prefixStart := 0
@@ -478,7 +526,7 @@ func DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scr
 	}
 
 	// Initialize padded prefix for the starting prefix length
-	paddedPrefix := scratch.Scratch1[:MaxIPLength]
+	paddedPrefix := scratch.Scratch1[:]
 	if isIPv4 {
 		copy(paddedPrefix, pfxIPv4PaddedPrefix[:])
 	} else {
@@ -488,14 +536,14 @@ func DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scr
 	// Process each bit position
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
 		// Compute pseudorandom function with dual AES encryption
-		e1 := scratch.Scratch2[:MaxIPLength]
+		e1 := scratch.Scratch2[:]
 		cipher1.Encrypt(e1, paddedPrefix)
 
-		e2 := scratch.Scratch3[:MaxIPLength]
+		e2 := scratch.Scratch3[:]
 		cipher2.Encrypt(e2, paddedPrefix)
 
 		// XOR the two encryptions
-		e := xorBytesTo(e1, e2, scratch.Scratch4[:MaxIPLength])
+		e := xorBytesTo(e1, e2, scratch.Scratch4[:])
 		// We only need the least significant bit
 		cipherBit := e[15] & 1
 
@@ -520,8 +568,8 @@ func DecryptIPPfxToScratch(encryptedIP net.IP, key []byte, decrypted []byte, scr
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
 // Returns the decrypted IP address.
 func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
-	decrypted := make([]byte, MaxIPLength)
-	return DecryptIPPfxTo(encryptedIP, key, decrypted)
+	decrypted := make([]byte, MaxIPSize)
+	return DecryptIPPfxTo(encryptedIP, key, decrypted, nil)
 }
 
 // Helper functions for bit manipulation
@@ -571,17 +619,9 @@ func shiftLeftOneBit(data []byte) {
 // The key must be exactly KeySizeNDX bytes long.
 // If tweak is nil, a random tweak will be generated.
 // The encrypted parameter must be a byte slice of minimum NonDeterministicXSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns a byte slice containing the tweak concatenated with the encrypted IP.
-func EncryptIPNonDeterministicXTo(ip string, key []byte, tweak []byte, encrypted []byte) ([]byte, error) {
-	return EncryptIPNonDeterministicXToScratch(ip, key, tweak, encrypted, nil)
-}
-
-// EncryptIPNonDeterministicXToScratch encrypts an IP address using ipcrypt-ndx mode using the provided scratchpad to avoid allocations.
-// The key must be exactly KeySizeNDX bytes long.
-// If tweak is nil, a random tweak will be generated.
-// The encrypted parameter must be a byte slice of minimum NonDeterministicXSize bytes long.
-// Returns a byte slice containing the tweak concatenated with the encrypted IP.
-func EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error) {
+func EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error) {
 	if err := validateKey(key, KeySizeNDX); err != nil {
 		return nil, err
 	}
@@ -591,7 +631,7 @@ func EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, en
 	}
 	scratch = getScratchPad(scratch)
 
-	ipBytes, err := validateIP(net.ParseIP(ip))
+	ipBytes, err := validateIP(ip)
 	if err != nil {
 		return nil, err
 	}
@@ -599,12 +639,12 @@ func EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, en
 	key1 := key[:KeySizeND]
 	key2 := key[KeySizeND:]
 
-	block1, err := aes.NewCipher(key1)
+	block1, err := scratch.getAESBlock(1, key1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create first cipher: %w", err)
 	}
 
-	block2, err := aes.NewCipher(key2)
+	block2, err := scratch.getAESBlock(2, key2)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
@@ -623,17 +663,17 @@ func EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, en
 		copy(encrypted[:TweakSizeX], t)
 	}
 
-	encryptedTweak := scratch.Scratch1[:MaxIPLength]
+	encryptedTweak := scratch.Scratch1[:]
 	block2.Encrypt(encryptedTweak, t)
 
-	xoredIP := xorBytesTo(ipBytes, encryptedTweak, scratch.Scratch2[:MaxIPLength])
+	xoredIP := xorBytesTo(ipBytes, encryptedTweak, scratch.Scratch2[:])
 	if xoredIP == nil {
 		return nil, errors.New("XOR operation failed")
 	}
 
 	block1.Encrypt(encrypted[TweakSizeX:], xoredIP)
 
-	finalEncrypted := xorBytesTo(encrypted[TweakSizeX:], encryptedTweak, scratch.Scratch3[:MaxIPLength])
+	finalEncrypted := xorBytesTo(encrypted[TweakSizeX:], encryptedTweak, scratch.Scratch3[:])
 	if finalEncrypted == nil {
 		return nil, errors.New("XOR operation failed")
 	}
@@ -648,22 +688,15 @@ func EncryptIPNonDeterministicXToScratch(ip string, key []byte, tweak []byte, en
 // Returns a byte slice containing the tweak concatenated with the encrypted IP.
 func EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error) {
 	encrypted := make([]byte, NonDeterministicXSize)
-	return EncryptIPNonDeterministicXTo(ip, key, tweak, encrypted)
+	return EncryptIPNonDeterministicXTo(net.ParseIP(ip), key, tweak, encrypted, nil)
 }
 
 // DecryptIPNonDeterministicXTo decrypts an IP address that was encrypted using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
+// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the decrypted IP address as a net.IP.
-func DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte) (net.IP, error) {
-	return DecryptIPNonDeterministicXToScratch(ciphertext, key, decrypted, nil)
-}
-
-// DecryptIPNonDeterministicXToScratch decrypts an IP address that was encrypted using ipcrypt-ndx mode using the provided scratchpad to avoid allocations.
-// The key must be exactly KeySizeNDX bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPLength bytes long.
-// Returns the decrypted IP address as a net.IP.
-func DecryptIPNonDeterministicXToScratch(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
+func DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if err := validateKey(key, KeySizeNDX); err != nil {
 		return nil, err
 	}
@@ -672,7 +705,7 @@ func DecryptIPNonDeterministicXToScratch(ciphertext []byte, key []byte, decrypte
 		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), NonDeterministicXSize)
 	}
 
-	if err := validateOutputLength(decrypted, MaxIPLength, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
 		return nil, err
 	}
 	scratch = getScratchPad(scratch)
@@ -680,12 +713,12 @@ func DecryptIPNonDeterministicXToScratch(ciphertext []byte, key []byte, decrypte
 	key1 := key[:KeySizeND]
 	key2 := key[KeySizeND:]
 
-	block1, err := aes.NewCipher(key1)
+	block1, err := scratch.getAESBlock(1, key1)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create first cipher: %w", err)
 	}
 
-	block2, err := aes.NewCipher(key2)
+	block2, err := scratch.getAESBlock(2, key2)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
@@ -693,31 +726,31 @@ func DecryptIPNonDeterministicXToScratch(ciphertext []byte, key []byte, decrypte
 	tweak := ciphertext[:TweakSizeX]
 	encryptedIP := ciphertext[TweakSizeX:]
 
-	encryptedTweak := scratch.Scratch1[:MaxIPLength]
+	encryptedTweak := scratch.Scratch1[:]
 	block2.Encrypt(encryptedTweak, tweak)
 
-	xoredIP := xorBytesTo(encryptedIP, encryptedTweak, scratch.Scratch2[:MaxIPLength])
+	xoredIP := xorBytesTo(encryptedIP, encryptedTweak, scratch.Scratch2[:])
 	if xoredIP == nil {
 		return nil, errors.New("XOR operation failed")
 	}
 
 	block1.Decrypt(decrypted, xoredIP)
 
-	finalDecrypted := xorBytesTo(decrypted, encryptedTweak, scratch.Scratch3[:MaxIPLength])
+	finalDecrypted := xorBytesTo(decrypted, encryptedTweak, scratch.Scratch3[:])
 	if finalDecrypted == nil {
 		return nil, errors.New("XOR operation failed")
 	}
 
 	copy(decrypted, finalDecrypted)
-	return net.IP(decrypted[:MaxIPLength]), nil
+	return net.IP(decrypted[:MaxIPSize]), nil
 }
 
 // DecryptIPNonDeterministicX decrypts an IP address that was encrypted using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
 // Returns the decrypted IP address as a string.
 func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
-	decrypted := make([]byte, MaxIPLength)
-	ip, err := DecryptIPNonDeterministicXTo(ciphertext, key, decrypted)
+	decrypted := make([]byte, MaxIPSize)
+	ip, err := DecryptIPNonDeterministicXTo(ciphertext, key, decrypted, nil)
 	if err != nil {
 		return "", err
 	}

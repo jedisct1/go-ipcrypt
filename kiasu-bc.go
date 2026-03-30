@@ -164,43 +164,48 @@ func expandKey(key []byte) [][]byte {
 		panic("key must be 16 bytes")
 	}
 
-	// Pre-allocate all memory at once
 	roundKeys := make([][]byte, 11)
 	allKeys := make([]byte, 11*16)
 	for i := range roundKeys {
 		roundKeys[i] = allKeys[i*16 : (i+1)*16]
 	}
+	var roundKeysArray [11][16]byte
+	expandKeyTo(key, &roundKeysArray)
+	for i := range roundKeys {
+		copy(roundKeys[i], roundKeysArray[i][:])
+	}
 
-	// Copy initial key
-	copy(roundKeys[0], key)
+	return roundKeys
+}
 
-	// Single temporary buffer for all rounds
-	temp := make([]byte, 4)
+func expandKeyTo(key []byte, roundKeys *[11][16]byte) {
+	if len(key) != 16 {
+		panic("key must be 16 bytes")
+	}
 
+	copy(roundKeys[0][:], key)
+
+	var temp [4]byte
 	for i := 1; i < 11; i++ {
-		prevKey := roundKeys[i-1]
-		currKey := roundKeys[i]
+		prevKey := roundKeys[i-1][:]
+		currKey := roundKeys[i][:]
 
-		// First word
-		// RotWord
 		temp[0] = prevKey[13]
 		temp[1] = prevKey[14]
 		temp[2] = prevKey[15]
 		temp[3] = prevKey[12]
-		// SubWord
+
 		temp[0] = sbox[temp[0]]
 		temp[1] = sbox[temp[1]]
 		temp[2] = sbox[temp[2]]
 		temp[3] = sbox[temp[3]]
-		// XOR with Rcon
 		temp[0] ^= rcon[i-1]
-		// XOR with previous key
+
 		currKey[0] = prevKey[0] ^ temp[0]
 		currKey[1] = prevKey[1] ^ temp[1]
 		currKey[2] = prevKey[2] ^ temp[2]
 		currKey[3] = prevKey[3] ^ temp[3]
 
-		// Remaining words
 		currKey[4] = currKey[0] ^ prevKey[4]
 		currKey[5] = currKey[1] ^ prevKey[5]
 		currKey[6] = currKey[2] ^ prevKey[6]
@@ -216,8 +221,6 @@ func expandKey(key []byte) [][]byte {
 		currKey[14] = currKey[10] ^ prevKey[14]
 		currKey[15] = currKey[11] ^ prevKey[15]
 	}
-
-	return roundKeys
 }
 
 // padTweak pads an 8-byte tweak to 16 bytes according to KIASU-BC specification.
@@ -227,11 +230,110 @@ func padTweak(tweak []byte) []byte {
 		panic("tweak must be 8 bytes")
 	}
 	padded := make([]byte, 16)
+	padTweakTo(tweak, padded)
+	return padded
+}
+
+func padTweakTo(tweak, padded []byte) {
+	if len(tweak) != 8 {
+		panic("tweak must be 8 bytes")
+	}
+	if len(padded) != 16 {
+		panic("padded tweak must be 16 bytes")
+	}
+	for i := range padded {
+		padded[i] = 0
+	}
 	for i := 0; i < 8; i += 2 {
 		padded[i*2] = tweak[i]
 		padded[i*2+1] = tweak[i+1]
 	}
-	return padded
+}
+
+func kiasuBCEncryptTo(roundKeys *[11][16]byte, tweak, block, state, paddedTweak []byte) error {
+	if len(tweak) != 8 {
+		return errors.New("tweak must be 8 bytes")
+	}
+	if len(block) != 16 {
+		return errors.New("block must be 16 bytes")
+	}
+	if len(state) != 16 {
+		return errors.New("state must be 16 bytes")
+	}
+	if len(paddedTweak) != 16 {
+		return errors.New("padded tweak must be 16 bytes")
+	}
+
+	padTweakTo(tweak, paddedTweak)
+	copy(state, block)
+
+	for i := 0; i < 16; i++ {
+		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
+	}
+
+	for round := 1; round < 10; round++ {
+		for i := 0; i < 16; i++ {
+			state[i] = sbox[state[i]]
+		}
+		shiftRows(state)
+		mixColumns(state)
+		for i := 0; i < 16; i++ {
+			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
+		}
+	}
+
+	for i := 0; i < 16; i++ {
+		state[i] = sbox[state[i]]
+	}
+	shiftRows(state)
+	for i := 0; i < 16; i++ {
+		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
+	}
+
+	return nil
+}
+
+func kiasuBCDecryptTo(roundKeys *[11][16]byte, tweak, block, state, paddedTweak []byte) error {
+	if len(tweak) != 8 {
+		return errors.New("tweak must be 8 bytes")
+	}
+	if len(block) != 16 {
+		return errors.New("block must be 16 bytes")
+	}
+	if len(state) != 16 {
+		return errors.New("state must be 16 bytes")
+	}
+	if len(paddedTweak) != 16 {
+		return errors.New("padded tweak must be 16 bytes")
+	}
+
+	padTweakTo(tweak, paddedTweak)
+	copy(state, block)
+
+	for i := 0; i < 16; i++ {
+		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
+	}
+	invShiftRows(state)
+	for i := 0; i < 16; i++ {
+		state[i] = invSbox[state[i]]
+	}
+
+	for round := 9; round > 0; round-- {
+		for i := 0; i < 16; i++ {
+			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
+		}
+		invMixColumns(state)
+		invShiftRows(state)
+		for i := 0; i < 16; i++ {
+			state[i] = invSbox[state[i]]
+		}
+	}
+
+	for i := 0; i < 16; i++ {
+		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
+	}
+
+	return nil
 }
 
 // KiasuBCEncrypt encrypts a 16-byte block using KIASU-BC with the given key and tweak.
@@ -246,52 +348,13 @@ func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
 		return nil, errors.New("block must be 16 bytes")
 	}
 
-	// Expand key and pad tweak
-	roundKeys := expandKey(key)
-	paddedTweak := padTweak(tweak)
-
-	// Create state
+	var roundKeys [11][16]byte
+	expandKeyTo(key, &roundKeys)
+	paddedTweak := make([]byte, 16)
 	state := make([]byte, 16)
-	copy(state, block)
-
-	// Initial round
-	for i := 0; i < 16; i++ {
-		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
+	if err := kiasuBCEncryptTo(&roundKeys, tweak, block, state, paddedTweak); err != nil {
+		return nil, err
 	}
-
-	// Main rounds
-	for round := 1; round < 10; round++ {
-		// SubBytes
-		for i := 0; i < 16; i++ {
-			state[i] = sbox[state[i]]
-		}
-
-		// ShiftRows
-		shiftRows(state)
-
-		// MixColumns
-		mixColumns(state)
-
-		// AddRoundKey
-		for i := 0; i < 16; i++ {
-			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
-		}
-	}
-
-	// Final round
-	// SubBytes
-	for i := 0; i < 16; i++ {
-		state[i] = sbox[state[i]]
-	}
-
-	// ShiftRows
-	shiftRows(state)
-
-	// AddRoundKey
-	for i := 0; i < 16; i++ {
-		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
-	}
-
 	return state, nil
 }
 
@@ -307,51 +370,12 @@ func KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error) {
 		return nil, errors.New("block must be 16 bytes")
 	}
 
-	// Expand key and pad tweak
-	roundKeys := expandKey(key)
-	paddedTweak := padTweak(tweak)
-
-	// Create state
+	var roundKeys [11][16]byte
+	expandKeyTo(key, &roundKeys)
+	paddedTweak := make([]byte, 16)
 	state := make([]byte, 16)
-	copy(state, block)
-
-	// Initial round
-	for i := 0; i < 16; i++ {
-		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
+	if err := kiasuBCDecryptTo(&roundKeys, tweak, block, state, paddedTweak); err != nil {
+		return nil, err
 	}
-
-	// Inverse ShiftRows
-	invShiftRows(state)
-
-	// Inverse SubBytes
-	for i := 0; i < 16; i++ {
-		state[i] = invSbox[state[i]]
-	}
-
-	// Main rounds
-	for round := 9; round > 0; round-- {
-		// AddRoundKey
-		for i := 0; i < 16; i++ {
-			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
-		}
-
-		// Inverse MixColumns
-		invMixColumns(state)
-
-		// Inverse ShiftRows
-		invShiftRows(state)
-
-		// Inverse SubBytes
-		for i := 0; i < 16; i++ {
-			state[i] = invSbox[state[i]]
-		}
-	}
-
-	// Final round
-	// AddRoundKey
-	for i := 0; i < 16; i++ {
-		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
-	}
-
 	return state, nil
 }
