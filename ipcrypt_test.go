@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -1147,17 +1148,26 @@ func benchmarkCasesFromTestVectors(b *testing.B, variant string) []benchmarkVect
 			continue
 		}
 
-		ip := net.ParseIP(tv.ip)
-		if ip == nil {
+		addr, err := netip.ParseAddr(tv.ip)
+		if err != nil {
 			b.Fatalf("invalid benchmark IP in test vector: %s", tv.ip)
 		}
 
-		isIPv4 := ip.To4() != nil
+		isIPv4 := addr.Is4()
 		if isIPv4 && haveIPv4 {
 			continue
 		}
 		if !isIPv4 && haveIPv6 {
 			continue
+		}
+
+		var ip net.IP
+		if isIPv4 {
+			temp := addr.As4()
+			ip = temp[:]
+		} else {
+			temp := addr.As16()
+			ip = temp[:]
 		}
 
 		key, err := hex.DecodeString(tv.key)
