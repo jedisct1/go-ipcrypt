@@ -11,6 +11,10 @@ The implementation provides four methods for IP address encryption:
 3. **ipcrypt-ndx**: An extended non-deterministic mode that uses a 32-byte key and 16-byte tweak for increased security.
 4. **ipcrypt-pfx**: A prefix-preserving mode that maintains the original IP format (IPv4 or IPv6).
 
+Every mode provides a `*To` variant that writes into a caller-supplied destination
+buffer, enabling callers to control allocations. The original functions are thin
+wrappers around these variants.
+
 ## Installation
 
 ```sh
@@ -49,6 +53,14 @@ func main() {
     }
     fmt.Printf("Decrypted: %s\n", decrypted)
 
+    // Zero-alloc deterministic mode using a pre-allocated buffer
+    dst := make([]byte, 16)
+    encrypted, err = ipcrypt.EncryptIPTo(dst, key, ip)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Encrypted (into dst): %s\n", encrypted)
+
     // ipcrypt-nd mode with random tweak
     ndKey := make([]byte, ipcrypt.KeySizeND)
     rand.Read(ndKey)
@@ -78,6 +90,22 @@ func main() {
         panic(err)
     }
     fmt.Printf("Extended non-deterministic decrypted: %s\n", decryptedX)
+
+    // ipcrypt-pfx mode (prefix-preserving)
+    pfxKey := make([]byte, 32)
+    rand.Read(pfxKey)
+
+    encryptedPfx, err := ipcrypt.EncryptIPPfx(ip, pfxKey)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Prefix-preserving encrypted: %s\n", encryptedPfx)
+
+    decryptedPfx, err := ipcrypt.DecryptIPPfx(encryptedPfx, pfxKey)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Prefix-preserving decrypted: %s\n", decryptedPfx)
 }
 ```
 
@@ -93,18 +121,42 @@ func main() {
 
 ### Functions
 
-#### Deterministic Mode
-- `EncryptIP(key []byte, ip net.IP) (net.IP, error)` - Encrypts an IP address deterministically
-- `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` - Decrypts an IP address deterministically
+For every mode the `*To` variant accepts a destination buffer `dst` as its first
+parameter. If `dst` is nil or too short, a new buffer is allocated automatically.
+The original functions (without `To`) call the `*To` variant with a nil `dst`.
 
-#### Prefix-Preserving Mode (ipcrypt-pfx)
-- `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation
-- `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation
+#### Deterministic Mode (ipcrypt-deterministic)
+
+- `EncryptIPTo(dst, key []byte, ip net.IP) (net.IP, error)` — Encrypts into dst (≥ 16 bytes)
+- `EncryptIP(key []byte, ip net.IP) (net.IP, error)` — Encrypts an IP address
+- `DecryptIPTo(dst, key []byte, encrypted net.IP) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
+- `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` — Decrypts an IP address
 
 #### Non-Deterministic Mode (ipcrypt-nd)
-- `EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 8-byte tweak
-- `DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-nd ciphertext
+
+- `EncryptIPNonDeterministicTo(dst []byte, ip string, key, tweak []byte) ([]byte, error)` — Encrypts into dst (≥ 24 bytes)
+- `EncryptIPNonDeterministic(ip string, key, tweak []byte) ([]byte, error)` — Encrypts with 8-byte tweak
+- `DecryptIPNonDeterministicTo(dst []byte, ciphertext, key []byte) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
+- `DecryptIPNonDeterministic(ciphertext, key []byte) (string, error)` — Decrypts ipcrypt-nd ciphertext
 
 #### Extended Non-Deterministic Mode (ipcrypt-ndx)
-- `EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 16-byte tweak
-- `DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-ndx ciphertext
+
+- `EncryptIPNonDeterministicXTo(dst []byte, ip string, key, tweak []byte) ([]byte, error)` — Encrypts into dst (≥ 32 bytes)
+- `EncryptIPNonDeterministicX(ip string, key, tweak []byte) ([]byte, error)` — Encrypts with 16-byte tweak
+- `DecryptIPNonDeterministicXTo(dst []byte, ciphertext, key []byte) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
+- `DecryptIPNonDeterministicX(ciphertext, key []byte) (string, error)` — Decrypts ipcrypt-ndx ciphertext
+
+#### Prefix-Preserving Mode (ipcrypt-pfx)
+
+- `EncryptIPPfxTo(dst []byte, ip net.IP, key []byte) (net.IP, error)` — Encrypts into dst (≥ 16 bytes)
+- `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` — Encrypts with prefix preservation
+- `DecryptIPPfxTo(dst []byte, encryptedIP net.IP, key []byte) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
+- `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` — Decrypts with prefix preservation
+
+The PFX key must be exactly 32 bytes (split into two AES-128 keys internally).
+For IPv4, `dst` must still be ≥ 16 bytes; the returned `net.IP` is `dst[12:16]`.
+
+#### KIASU-BC (low-level)
+
+- `KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error)` — Encrypts a 16-byte block with KIASU-BC
+- `KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error)` — Decrypts a 16-byte block with KIASU-BC

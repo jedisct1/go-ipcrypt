@@ -106,7 +106,6 @@ func gmul(a, b byte) byte {
 	return p
 }
 
-// shiftRows performs the ShiftRows operation on the state
 func shiftRows(state []byte) {
 	// Row 0: no shift
 	// Row 1: shift left by 1
@@ -117,7 +116,6 @@ func shiftRows(state []byte) {
 	state[3], state[7], state[11], state[15] = state[15], state[3], state[7], state[11]
 }
 
-// invShiftRows performs the inverse ShiftRows operation on the state
 func invShiftRows(state []byte) {
 	// Row 0: no shift
 	// Row 1: shift right by 1
@@ -128,7 +126,6 @@ func invShiftRows(state []byte) {
 	state[3], state[7], state[11], state[15] = state[7], state[11], state[15], state[3]
 }
 
-// mixColumns performs the MixColumns operation on the state
 func mixColumns(state []byte) {
 	for i := 0; i < 16; i += 4 {
 		s0 := state[i]
@@ -143,7 +140,6 @@ func mixColumns(state []byte) {
 	}
 }
 
-// invMixColumns performs the inverse MixColumns operation on the state
 func invMixColumns(state []byte) {
 	for i := 0; i < 16; i += 4 {
 		s0 := state[i]
@@ -220,39 +216,43 @@ func expandKey(key []byte) [][]byte {
 	return roundKeys
 }
 
-// padTweak pads an 8-byte tweak to 16 bytes according to KIASU-BC specification.
-// The tweak is padded by placing each 2-byte pair at the start of a 4-byte group.
-func padTweak(tweak []byte) []byte {
-	if len(tweak) != 8 {
-		panic("tweak must be 8 bytes")
+// padTweakTo pads an 8-byte tweak into dst (must be ≥ 16 bytes).
+// Zeros dst[:16] before writing.
+func padTweakTo(dst, tweak []byte) {
+	_ = dst[15] // bounds check hint
+	for i := range dst[:16] {
+		dst[i] = 0
 	}
-	padded := make([]byte, 16)
 	for i := 0; i < 8; i += 2 {
-		padded[i*2] = tweak[i]
-		padded[i*2+1] = tweak[i+1]
+		dst[i*2] = tweak[i]
+		dst[i*2+1] = tweak[i+1]
 	}
-	return padded
 }
 
-// KiasuBCEncrypt encrypts a 16-byte block using KIASU-BC with the given key and tweak.
-func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
+// kiasuBCEncryptTo encrypts a 16-byte block into dst using KIASU-BC.
+// dst and block must each be exactly 16 bytes; dst must not alias block.
+func kiasuBCEncryptTo(dst, key, tweak, block []byte) error {
+	if len(dst) < 16 {
+		return errors.New("dst must be at least 16 bytes")
+	}
 	if len(key) != 16 {
-		return nil, errors.New("key must be 16 bytes")
+		return errors.New("key must be 16 bytes")
 	}
 	if len(tweak) != 8 {
-		return nil, errors.New("tweak must be 8 bytes")
+		return errors.New("tweak must be 8 bytes")
 	}
 	if len(block) != 16 {
-		return nil, errors.New("block must be 16 bytes")
+		return errors.New("block must be 16 bytes")
 	}
 
 	// Expand key and pad tweak
 	roundKeys := expandKey(key)
-	paddedTweak := padTweak(tweak)
+	var paddedTweak [16]byte
+	padTweakTo(paddedTweak[:], tweak)
 
-	// Create state
-	state := make([]byte, 16)
-	copy(state, block)
+	// Create state on the stack
+	var state [16]byte
+	copy(state[:], block)
 
 	// Initial round
 	for i := 0; i < 16; i++ {
@@ -261,97 +261,99 @@ func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
 
 	// Main rounds
 	for round := 1; round < 10; round++ {
-		// SubBytes
 		for i := 0; i < 16; i++ {
 			state[i] = sbox[state[i]]
 		}
-
-		// ShiftRows
-		shiftRows(state)
-
-		// MixColumns
-		mixColumns(state)
-
-		// AddRoundKey
+		shiftRows(state[:])
+		mixColumns(state[:])
 		for i := 0; i < 16; i++ {
 			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
 		}
 	}
 
 	// Final round
-	// SubBytes
 	for i := 0; i < 16; i++ {
 		state[i] = sbox[state[i]]
 	}
-
-	// ShiftRows
-	shiftRows(state)
-
-	// AddRoundKey
+	shiftRows(state[:])
 	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
 	}
 
-	return state, nil
+	copy(dst, state[:])
+	return nil
 }
 
-// KiasuBCDecrypt decrypts a 16-byte block using KIASU-BC with the given key and tweak.
-func KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error) {
+// KiasuBCEncrypt encrypts a 16-byte block using KIASU-BC with the given key and tweak.
+func KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error) {
+	dst := make([]byte, 16)
+	if err := kiasuBCEncryptTo(dst, key, tweak, block); err != nil {
+		return nil, err
+	}
+	return dst, nil
+}
+
+// kiasuBCDecryptTo decrypts a 16-byte block into dst using KIASU-BC.
+// dst and block must each be exactly 16 bytes; dst must not alias block.
+func kiasuBCDecryptTo(dst, key, tweak, block []byte) error {
+	if len(dst) < 16 {
+		return errors.New("dst must be at least 16 bytes")
+	}
 	if len(key) != 16 {
-		return nil, errors.New("key must be 16 bytes")
+		return errors.New("key must be 16 bytes")
 	}
 	if len(tweak) != 8 {
-		return nil, errors.New("tweak must be 8 bytes")
+		return errors.New("tweak must be 8 bytes")
 	}
 	if len(block) != 16 {
-		return nil, errors.New("block must be 16 bytes")
+		return errors.New("block must be 16 bytes")
 	}
 
 	// Expand key and pad tweak
 	roundKeys := expandKey(key)
-	paddedTweak := padTweak(tweak)
+	var paddedTweak [16]byte
+	padTweakTo(paddedTweak[:], tweak)
 
-	// Create state
-	state := make([]byte, 16)
-	copy(state, block)
+	// Create state on the stack
+	var state [16]byte
+	copy(state[:], block)
 
 	// Initial round
 	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[10][i] ^ paddedTweak[i]
 	}
 
-	// Inverse ShiftRows
-	invShiftRows(state)
-
-	// Inverse SubBytes
+	invShiftRows(state[:])
 	for i := 0; i < 16; i++ {
 		state[i] = invSbox[state[i]]
 	}
 
 	// Main rounds
 	for round := 9; round > 0; round-- {
-		// AddRoundKey
 		for i := 0; i < 16; i++ {
 			state[i] ^= roundKeys[round][i] ^ paddedTweak[i]
 		}
-
-		// Inverse MixColumns
-		invMixColumns(state)
-
-		// Inverse ShiftRows
-		invShiftRows(state)
-
-		// Inverse SubBytes
+		invMixColumns(state[:])
+		invShiftRows(state[:])
 		for i := 0; i < 16; i++ {
 			state[i] = invSbox[state[i]]
 		}
 	}
 
 	// Final round
-	// AddRoundKey
 	for i := 0; i < 16; i++ {
 		state[i] ^= roundKeys[0][i] ^ paddedTweak[i]
 	}
 
-	return state, nil
+	copy(dst, state[:])
+	return nil
+}
+
+// KiasuBCDecrypt decrypts a 16-byte block using KIASU-BC with the given key and tweak.
+func KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error) {
+	dst := make([]byte, 16)
+	if err := kiasuBCDecryptTo(dst, key, tweak, block); err != nil {
+		return nil, err
+	}
+	return dst, nil
 }

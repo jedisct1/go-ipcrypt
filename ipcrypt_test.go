@@ -552,3 +552,575 @@ func TestInvalidInputs(t *testing.T) {
 		t.Errorf("Expected invalid ciphertext length error, got %v", err)
 	}
 }
+
+// TestEncryptIPTo tests the EncryptIPTo destination-buffer variant.
+func TestEncryptIPTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ip := net.ParseIP("0.0.0.0")
+	expected := "bde9:6789:d353:824c:d7c6:f58a:6bd2:26eb"
+
+	t.Run("pre-allocated", func(t *testing.T) {
+		dst := make([]byte, 16)
+		result, err := EncryptIPTo(dst, key, ip)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != expected {
+			t.Errorf("got %s, want %s", result, expected)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		result, err := EncryptIPTo(nil, key, ip)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != expected {
+			t.Errorf("got %s, want %s", result, expected)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		dst := make([]byte, 4)
+		result, err := EncryptIPTo(dst, key, ip)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != expected {
+			t.Errorf("got %s, want %s", result, expected)
+		}
+	})
+}
+
+// TestDecryptIPTo tests the DecryptIPTo destination-buffer variant.
+func TestDecryptIPTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ip := net.ParseIP("0.0.0.0")
+	encrypted, _ := EncryptIP(key, ip)
+
+	t.Run("pre-allocated", func(t *testing.T) {
+		dst := make([]byte, 16)
+		result, err := DecryptIPTo(dst, key, encrypted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(ip) {
+			t.Errorf("got %s, want %s", result, ip)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		result, err := DecryptIPTo(nil, key, encrypted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(ip) {
+			t.Errorf("got %s, want %s", result, ip)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		result, err := DecryptIPTo(make([]byte, 4), key, encrypted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(ip) {
+			t.Errorf("got %s, want %s", result, ip)
+		}
+	})
+}
+
+// TestEncryptIPNonDeterministicTo tests the ND To variant.
+func TestEncryptIPNonDeterministicTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	tweak, _ := hex.DecodeString("08e0c289bff23b7c")
+	expected := "08e0c289bff23b7cb349aadfe3bcef56221c384c7c217b16"
+
+	t.Run("pre-allocated", func(t *testing.T) {
+		dst := make([]byte, TweakSize+16)
+		result, err := EncryptIPNonDeterministicTo(dst, "0.0.0.0", key, tweak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(result) != expected {
+			t.Errorf("got %s, want %s", hex.EncodeToString(result), expected)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		result, err := EncryptIPNonDeterministicTo(nil, "0.0.0.0", key, tweak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(result) != expected {
+			t.Errorf("got %s, want %s", hex.EncodeToString(result), expected)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		result, err := EncryptIPNonDeterministicTo(make([]byte, 4), "0.0.0.0", key, tweak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(result) != expected {
+			t.Errorf("got %s, want %s", hex.EncodeToString(result), expected)
+		}
+	})
+}
+
+// TestDecryptIPNonDeterministicTo tests the ND decrypt To variant.
+func TestDecryptIPNonDeterministicTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ciphertext, _ := hex.DecodeString("08e0c289bff23b7cb349aadfe3bcef56221c384c7c217b16")
+
+	t.Run("pre-allocated", func(t *testing.T) {
+		dst := make([]byte, 16)
+		result, err := DecryptIPNonDeterministicTo(dst, ciphertext, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.IPv4(0, 0, 0, 0)) {
+			t.Errorf("got %s, want 0.0.0.0", result)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		result, err := DecryptIPNonDeterministicTo(nil, ciphertext, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.IPv4(0, 0, 0, 0)) {
+			t.Errorf("got %s, want 0.0.0.0", result)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		result, err := DecryptIPNonDeterministicTo(make([]byte, 4), ciphertext, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.IPv4(0, 0, 0, 0)) {
+			t.Errorf("got %s, want 0.0.0.0", result)
+		}
+	})
+}
+
+// TestEncryptIPNonDeterministicXTo tests the NDX encrypt To variant.
+func TestEncryptIPNonDeterministicXTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	tweak, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d7")
+	expected := "21bd1834bc088cd2b4ecbe30b70898d782db0d4125fdace61db35b8339f20ee5"
+
+	t.Run("pre-allocated", func(t *testing.T) {
+		dst := make([]byte, TweakSizeX+16)
+		result, err := EncryptIPNonDeterministicXTo(dst, "0.0.0.0", key, tweak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(result) != expected {
+			t.Errorf("got %s, want %s", hex.EncodeToString(result), expected)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		result, err := EncryptIPNonDeterministicXTo(nil, "0.0.0.0", key, tweak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(result) != expected {
+			t.Errorf("got %s, want %s", hex.EncodeToString(result), expected)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		result, err := EncryptIPNonDeterministicXTo(make([]byte, 4), "0.0.0.0", key, tweak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hex.EncodeToString(result) != expected {
+			t.Errorf("got %s, want %s", hex.EncodeToString(result), expected)
+		}
+	})
+}
+
+// TestDecryptIPNonDeterministicXTo tests the NDX decrypt To variant.
+func TestDecryptIPNonDeterministicXTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ciphertext, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d782db0d4125fdace61db35b8339f20ee5")
+
+	t.Run("pre-allocated", func(t *testing.T) {
+		dst := make([]byte, 16)
+		result, err := DecryptIPNonDeterministicXTo(dst, ciphertext, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.IPv4(0, 0, 0, 0)) {
+			t.Errorf("got %s, want 0.0.0.0", result)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		result, err := DecryptIPNonDeterministicXTo(nil, ciphertext, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.IPv4(0, 0, 0, 0)) {
+			t.Errorf("got %s, want 0.0.0.0", result)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		result, err := DecryptIPNonDeterministicXTo(make([]byte, 4), ciphertext, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.IPv4(0, 0, 0, 0)) {
+			t.Errorf("got %s, want 0.0.0.0", result)
+		}
+	})
+}
+
+// TestEncryptIPPfxTo tests the PFX encrypt To variant.
+func TestEncryptIPPfxTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+
+	t.Run("ipv4/pre-allocated", func(t *testing.T) {
+		ip := net.ParseIP("192.0.2.1")
+		dst := make([]byte, 16)
+		result, err := EncryptIPPfxTo(dst, ip, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != "100.115.72.131" {
+			t.Errorf("got %s, want 100.115.72.131", result)
+		}
+		// IPv4 returns dst[12:16]
+		if &result[0] != &dst[12] {
+			t.Error("IPv4 result does not point into dst[12:]")
+		}
+	})
+
+	t.Run("ipv6/pre-allocated", func(t *testing.T) {
+		ip := net.ParseIP("2001:db8::1")
+		dst := make([]byte, 16)
+		result, err := EncryptIPPfxTo(dst, ip, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != "c180:5dd4:2587:3524:30ab:fa65:6ab6:f88" {
+			t.Errorf("got %s, want c180:5dd4:2587:3524:30ab:fa65:6ab6:f88", result)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("IPv6 result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		ip := net.ParseIP("192.0.2.1")
+		result, err := EncryptIPPfxTo(nil, ip, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != "100.115.72.131" {
+			t.Errorf("got %s, want 100.115.72.131", result)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		ip := net.ParseIP("192.0.2.1")
+		result, err := EncryptIPPfxTo(make([]byte, 4), ip, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.String() != "100.115.72.131" {
+			t.Errorf("got %s, want 100.115.72.131", result)
+		}
+	})
+}
+
+// TestDecryptIPPfxTo tests the PFX decrypt To variant.
+func TestDecryptIPPfxTo(t *testing.T) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+
+	t.Run("ipv4/pre-allocated", func(t *testing.T) {
+		encrypted := net.ParseIP("100.115.72.131")
+		dst := make([]byte, 16)
+		result, err := DecryptIPPfxTo(dst, encrypted, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.ParseIP("192.0.2.1")) {
+			t.Errorf("got %s, want 192.0.2.1", result)
+		}
+		if &result[0] != &dst[12] {
+			t.Error("IPv4 result does not point into dst[12:]")
+		}
+	})
+
+	t.Run("ipv6/pre-allocated", func(t *testing.T) {
+		encrypted := net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88")
+		dst := make([]byte, 16)
+		result, err := DecryptIPPfxTo(dst, encrypted, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.ParseIP("2001:db8::1")) {
+			t.Errorf("got %s, want 2001:db8::1", result)
+		}
+		if &result[0] != &dst[0] {
+			t.Error("IPv6 result does not point into dst")
+		}
+	})
+
+	t.Run("nil-dst", func(t *testing.T) {
+		encrypted := net.ParseIP("100.115.72.131")
+		result, err := DecryptIPPfxTo(nil, encrypted, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.ParseIP("192.0.2.1")) {
+			t.Errorf("got %s, want 192.0.2.1", result)
+		}
+	})
+
+	t.Run("short-dst", func(t *testing.T) {
+		encrypted := net.ParseIP("100.115.72.131")
+		result, err := DecryptIPPfxTo(make([]byte, 4), encrypted, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Equal(net.ParseIP("192.0.2.1")) {
+			t.Errorf("got %s, want 192.0.2.1", result)
+		}
+	})
+}
+
+// Allocation benchmarks
+
+func BenchmarkEncryptIP(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ip := net.ParseIP("192.0.2.1")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIP(key, ip)
+	}
+}
+
+func BenchmarkEncryptIPTo(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ip := net.ParseIP("192.0.2.1")
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPTo(dst, key, ip)
+	}
+}
+
+func BenchmarkDecryptIP(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ip := net.ParseIP("192.0.2.1")
+	encrypted, _ := EncryptIP(key, ip)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIP(key, encrypted)
+	}
+}
+
+func BenchmarkDecryptIPTo(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	ip := net.ParseIP("192.0.2.1")
+	encrypted, _ := EncryptIP(key, ip)
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPTo(dst, key, encrypted)
+	}
+}
+
+func BenchmarkEncryptIPNonDeterministic(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	tweak, _ := hex.DecodeString("08e0c289bff23b7c")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPNonDeterministic("192.0.2.1", key, tweak)
+	}
+}
+
+func BenchmarkEncryptIPNonDeterministicTo(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	tweak, _ := hex.DecodeString("08e0c289bff23b7c")
+	dst := make([]byte, TweakSize+16)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPNonDeterministicTo(dst, "192.0.2.1", key, tweak)
+	}
+}
+
+func BenchmarkDecryptIPNonDeterministic(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	tweak, _ := hex.DecodeString("08e0c289bff23b7c")
+	ct, _ := EncryptIPNonDeterministic("192.0.2.1", key, tweak)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPNonDeterministic(ct, key)
+	}
+}
+
+func BenchmarkDecryptIPNonDeterministicTo(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba9876543210")
+	tweak, _ := hex.DecodeString("08e0c289bff23b7c")
+	ct, _ := EncryptIPNonDeterministic("192.0.2.1", key, tweak)
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPNonDeterministicTo(dst, ct, key)
+	}
+}
+
+func BenchmarkEncryptIPNonDeterministicX(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	tweak, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d7")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPNonDeterministicX("192.0.2.1", key, tweak)
+	}
+}
+
+func BenchmarkEncryptIPNonDeterministicXTo(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	tweak, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d7")
+	dst := make([]byte, TweakSizeX+16)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPNonDeterministicXTo(dst, "192.0.2.1", key, tweak)
+	}
+}
+
+func BenchmarkDecryptIPNonDeterministicX(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	tweak, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d7")
+	ct, _ := EncryptIPNonDeterministicX("192.0.2.1", key, tweak)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPNonDeterministicX(ct, key)
+	}
+}
+
+func BenchmarkDecryptIPNonDeterministicXTo(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	tweak, _ := hex.DecodeString("21bd1834bc088cd2b4ecbe30b70898d7")
+	ct, _ := EncryptIPNonDeterministicX("192.0.2.1", key, tweak)
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPNonDeterministicXTo(dst, ct, key)
+	}
+}
+
+func BenchmarkEncryptIPPfx_IPv4(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("192.0.2.1")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPPfx(ip, key)
+	}
+}
+
+func BenchmarkEncryptIPPfxTo_IPv4(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("192.0.2.1")
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPPfxTo(dst, ip, key)
+	}
+}
+
+func BenchmarkDecryptIPPfx_IPv4(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("192.0.2.1")
+	encrypted, _ := EncryptIPPfx(ip, key)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPPfx(encrypted, key)
+	}
+}
+
+func BenchmarkDecryptIPPfxTo_IPv4(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("192.0.2.1")
+	encrypted, _ := EncryptIPPfx(ip, key)
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPPfxTo(dst, encrypted, key)
+	}
+}
+
+func BenchmarkEncryptIPPfx_IPv6(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("2001:db8::1")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPPfx(ip, key)
+	}
+}
+
+func BenchmarkEncryptIPPfxTo_IPv6(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("2001:db8::1")
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = EncryptIPPfxTo(dst, ip, key)
+	}
+}
+
+func BenchmarkDecryptIPPfx_IPv6(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("2001:db8::1")
+	encrypted, _ := EncryptIPPfx(ip, key)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPPfx(encrypted, key)
+	}
+}
+
+func BenchmarkDecryptIPPfxTo_IPv6(b *testing.B) {
+	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	ip := net.ParseIP("2001:db8::1")
+	encrypted, _ := EncryptIPPfx(ip, key)
+	dst := make([]byte, 16)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = DecryptIPPfxTo(dst, encrypted, key)
+	}
+}

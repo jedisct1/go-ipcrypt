@@ -37,9 +37,6 @@ var (
 	ErrInvalidTweak   = errors.New("invalid tweak size")
 )
 
-// Utility functions
-
-// validateKey checks if the key length matches the expected size
 func validateKey(key []byte, expectedSize int) error {
 	if len(key) != expectedSize {
 		return fmt.Errorf("%w: got %d bytes, want %d bytes", ErrInvalidKeySize, len(key), expectedSize)
@@ -59,7 +56,6 @@ func validateIP(ip net.IP) ([]byte, error) {
 	return ip16, nil
 }
 
-// validateTweak checks if the tweak length matches the expected size
 func validateTweak(tweak []byte, expectedSize int) error {
 	if len(tweak) != expectedSize {
 		return fmt.Errorf("%w: got %d bytes, want %d bytes", ErrInvalidTweak, len(tweak), expectedSize)
@@ -67,22 +63,20 @@ func validateTweak(tweak []byte, expectedSize int) error {
 	return nil
 }
 
-// xorBytes performs XOR operation on two byte slices of equal length
-func xorBytes(a, b []byte) []byte {
-	if len(a) != len(b) {
-		return nil
-	}
-	c := make([]byte, len(a))
-	subtle.XORBytes(c, a, b)
-	return c
+// xorBytesTo writes a ^ b into dst. dst, a, b must all be the same length.
+// dst may be the same slice as a or b (exact overlap), but must not
+// partially overlap either input.
+func xorBytesTo(dst, a, b []byte) {
+	subtle.XORBytes(dst, a, b)
 }
 
 // Deterministic mode functions
 
-// EncryptIP encrypts an IP address using ipcrypt-deterministic mode.
+// EncryptIPTo encrypts an IP address into dst using ipcrypt-deterministic mode.
+// dst must be at least 16 bytes; if dst is nil or too short a new buffer is allocated.
 // The key must be exactly KeySizeDeterministic bytes long.
-// Returns the encrypted IP address as a net.IP.
-func EncryptIP(key []byte, ip net.IP) (net.IP, error) {
+// Returns dst[:16] as net.IP.
+func EncryptIPTo(dst, key []byte, ip net.IP) (net.IP, error) {
 	if err := validateKey(key, KeySizeDeterministic); err != nil {
 		return nil, err
 	}
@@ -97,16 +91,26 @@ func EncryptIP(key []byte, ip net.IP) (net.IP, error) {
 		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
 
-	encrypted := make([]byte, 16)
-	block.Encrypt(encrypted, ipBytes)
+	if len(dst) < 16 {
+		dst = make([]byte, 16)
+	}
+	block.Encrypt(dst[:16], ipBytes)
 
-	return net.IP(encrypted), nil
+	return net.IP(dst[:16]), nil
 }
 
-// DecryptIP decrypts an IP address that was encrypted using ipcrypt-deterministic mode.
+// EncryptIP encrypts an IP address using ipcrypt-deterministic mode.
 // The key must be exactly KeySizeDeterministic bytes long.
-// Returns the decrypted IP address as a net.IP.
-func DecryptIP(key []byte, encrypted net.IP) (net.IP, error) {
+// Returns the encrypted IP address as a net.IP.
+func EncryptIP(key []byte, ip net.IP) (net.IP, error) {
+	return EncryptIPTo(nil, key, ip)
+}
+
+// DecryptIPTo decrypts an encrypted IP address into dst using ipcrypt-deterministic mode.
+// dst must be at least 16 bytes; if dst is nil or too short a new buffer is allocated.
+// The key must be exactly KeySizeDeterministic bytes long.
+// Returns dst[:16] as net.IP.
+func DecryptIPTo(dst, key []byte, encrypted net.IP) (net.IP, error) {
 	if err := validateKey(key, KeySizeDeterministic); err != nil {
 		return nil, err
 	}
@@ -121,19 +125,29 @@ func DecryptIP(key []byte, encrypted net.IP) (net.IP, error) {
 		return nil, fmt.Errorf("failed to create cipher: %w", err)
 	}
 
-	decrypted := make([]byte, 16)
-	block.Decrypt(decrypted, ipBytes)
+	if len(dst) < 16 {
+		dst = make([]byte, 16)
+	}
+	block.Decrypt(dst[:16], ipBytes)
 
-	return net.IP(decrypted), nil
+	return net.IP(dst[:16]), nil
+}
+
+// DecryptIP decrypts an IP address that was encrypted using ipcrypt-deterministic mode.
+// The key must be exactly KeySizeDeterministic bytes long.
+// Returns the decrypted IP address as a net.IP.
+func DecryptIP(key []byte, encrypted net.IP) (net.IP, error) {
+	return DecryptIPTo(nil, key, encrypted)
 }
 
 // Non-deterministic mode functions
 
-// EncryptIPNonDeterministic encrypts an IP address using ipcrypt-nd mode.
-// The key must be exactly KeySizeND bytes long.
+// EncryptIPNonDeterministicTo encrypts an IP address into dst using ipcrypt-nd mode.
+// dst must be at least TweakSize+16 (24) bytes; if dst is nil or too short a new
+// buffer is allocated. The key must be exactly KeySizeND bytes long.
 // If tweak is nil, a random tweak will be generated.
-// Returns a byte slice containing the tweak concatenated with the encrypted IP.
-func EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error) {
+// Returns dst[:24] containing tweak‖ciphertext.
+func EncryptIPNonDeterministicTo(dst []byte, ip string, key []byte, tweak []byte) ([]byte, error) {
 	if err := validateKey(key, KeySizeND); err != nil {
 		return nil, err
 	}
@@ -156,46 +170,68 @@ func EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, err
 		t = tweak
 	}
 
-	encrypted, err := KiasuBCEncrypt(key, t, ipBytes)
-	if err != nil {
+	const resultSize = TweakSize + 16
+	if len(dst) < resultSize {
+		dst = make([]byte, resultSize)
+	}
+	copy(dst[:TweakSize], t)
+	if err := kiasuBCEncryptTo(dst[TweakSize:TweakSize+16], key, t, ipBytes); err != nil {
+		return nil, err
+	}
+	return dst[:resultSize], nil
+}
+
+// EncryptIPNonDeterministic encrypts an IP address using ipcrypt-nd mode.
+// The key must be exactly KeySizeND bytes long.
+// If tweak is nil, a random tweak will be generated.
+// Returns a byte slice containing the tweak concatenated with the encrypted IP.
+func EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error) {
+	return EncryptIPNonDeterministicTo(nil, ip, key, tweak)
+}
+
+// DecryptIPNonDeterministicTo decrypts an IP address into dst using ipcrypt-nd mode.
+// dst must be at least 16 bytes; if dst is nil or too short a new buffer is allocated.
+// The key must be exactly KeySizeND bytes long.
+// Returns the decrypted IP as net.IP (a sub-slice of dst).
+func DecryptIPNonDeterministicTo(dst []byte, ciphertext, key []byte) (net.IP, error) {
+	if err := validateKey(key, KeySizeND); err != nil {
 		return nil, err
 	}
 
-	result := make([]byte, TweakSize+16)
-	copy(result[:TweakSize], t)
-	copy(result[TweakSize:], encrypted)
-	return result, nil
+	if len(ciphertext) != TweakSize+16 {
+		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), TweakSize+16)
+	}
+
+	tweak := ciphertext[:TweakSize]
+	encryptedIP := ciphertext[TweakSize:]
+
+	if len(dst) < 16 {
+		dst = make([]byte, 16)
+	}
+	if err := kiasuBCDecryptTo(dst[:16], key, tweak, encryptedIP); err != nil {
+		return nil, err
+	}
+	return net.IP(dst[:16]), nil
 }
 
 // DecryptIPNonDeterministic decrypts an IP address that was encrypted using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
 // Returns the decrypted IP address as a string.
 func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
-	if err := validateKey(key, KeySizeND); err != nil {
-		return "", err
-	}
-
-	if len(ciphertext) != TweakSize+16 {
-		return "", fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), TweakSize+16)
-	}
-
-	tweak := ciphertext[:TweakSize]
-	encryptedIP := ciphertext[TweakSize:]
-
-	decrypted, err := KiasuBCDecrypt(key, tweak, encryptedIP)
+	ip, err := DecryptIPNonDeterministicTo(nil, ciphertext, key)
 	if err != nil {
 		return "", err
 	}
-
-	return net.IP(decrypted).String(), nil
+	return ip.String(), nil
 }
 
 // Prefix-preserving mode functions
 
-// EncryptIPPfx encrypts an IP address using ipcrypt-pfx mode.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
-// Returns the encrypted IP address maintaining the original format (IPv4 or IPv6).
-func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
+// EncryptIPPfxTo encrypts an IP address into dst using ipcrypt-pfx mode.
+// dst must be at least 16 bytes even for IPv4 inputs; if dst is nil or too short
+// a new buffer is allocated. The key must be exactly 32 bytes long.
+// For IPv4 the returned net.IP is dst[12:16]; for IPv6 it is dst[:16].
+func EncryptIPPfxTo(dst []byte, ip net.IP, key []byte) (net.IP, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
 	}
@@ -229,15 +265,16 @@ func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
 	// Determine if this is IPv4
 	isIPv4 := ip.To4() != nil
 
-	// Initialize encrypted result
-	encrypted := make([]byte, 16)
+	if len(dst) < 16 {
+		dst = make([]byte, 16)
+	}
 
 	// Determine starting point
 	prefixStart := 0
 	if isIPv4 {
 		prefixStart = 96
 		// Copy the IPv4-mapped prefix
-		copy(encrypted[:12], ipBytes[:12])
+		copy(dst[:12], ipBytes[:12])
 	}
 
 	// Initialize padded prefix for the starting prefix length
@@ -253,44 +290,49 @@ func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
 	}
 
 	// Process each bit position
+	var e1, e2 [16]byte
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
 		// Compute pseudorandom function with dual AES encryption
-		e1 := make([]byte, 16)
-		cipher1.Encrypt(e1, paddedPrefix)
+		cipher1.Encrypt(e1[:], paddedPrefix)
+		cipher2.Encrypt(e2[:], paddedPrefix)
 
-		e2 := make([]byte, 16)
-		cipher2.Encrypt(e2, paddedPrefix)
-
-		// XOR the two encryptions
-		e := xorBytes(e1, e2)
-		// We only need the least significant bit
-		cipherBit := e[15] & 1
+		// XOR the two encryptions; reuse e1 as target
+		xorBytesTo(e1[:], e1[:], e2[:])
+		cipherBit := e1[15] & 1
 
 		// Extract the current bit from the original IP
 		currentBitPos := 127 - prefixLenBits
 		originalBit := getBit(ipBytes, currentBitPos)
 
 		// Set the bit in the encrypted result
-		setBit(encrypted, currentBitPos, cipherBit^originalBit)
+		setBit(dst, currentBitPos, cipherBit^originalBit)
 
 		// Prepare padded_prefix for next iteration
 		// Shift left by 1 bit and insert the next bit from ipBytes
-		paddedPrefix = shiftLeftOneBit(paddedPrefix)
+		shiftLeftOneBit(paddedPrefix)
 		setBit(paddedPrefix, 0, originalBit)
 	}
 
 	// Return the appropriate format
 	if isIPv4 {
 		// Return just the IPv4 part
-		return net.IP(encrypted[12:16]), nil
+		return net.IP(dst[12:16]), nil
 	}
-	return net.IP(encrypted), nil
+	return net.IP(dst[:16]), nil
 }
 
-// DecryptIPPfx decrypts an IP address that was encrypted using ipcrypt-pfx mode.
+// EncryptIPPfx encrypts an IP address using ipcrypt-pfx mode.
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
-// Returns the decrypted IP address.
-func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
+// Returns the encrypted IP address maintaining the original format (IPv4 or IPv6).
+func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
+	return EncryptIPPfxTo(nil, ip, key)
+}
+
+// DecryptIPPfxTo decrypts an encrypted IP address into dst using ipcrypt-pfx mode.
+// dst must be at least 16 bytes even for IPv4 inputs; if dst is nil or too short
+// a new buffer is allocated. The key must be exactly 32 bytes long.
+// For IPv4 the returned net.IP is dst[12:16]; for IPv6 it is dst[:16].
+func DecryptIPPfxTo(dst []byte, encryptedIP net.IP, key []byte) (net.IP, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
 	}
@@ -324,15 +366,16 @@ func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
 		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
 
-	// Initialize decrypted result
-	decrypted := make([]byte, 16)
+	if len(dst) < 16 {
+		dst = make([]byte, 16)
+	}
 
 	// Determine starting point
 	prefixStart := 0
 	if isIPv4 {
 		prefixStart = 96
 		// Copy the IPv4-mapped prefix
-		copy(decrypted[:12], encryptedBytes[:12])
+		copy(dst[:12], encryptedBytes[:12])
 	}
 
 	// Initialize padded prefix for the starting prefix length
@@ -348,18 +391,15 @@ func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
 	}
 
 	// Process each bit position
+	var e1, e2 [16]byte
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
 		// Compute pseudorandom function with dual AES encryption
-		e1 := make([]byte, 16)
-		cipher1.Encrypt(e1, paddedPrefix)
+		cipher1.Encrypt(e1[:], paddedPrefix)
+		cipher2.Encrypt(e2[:], paddedPrefix)
 
-		e2 := make([]byte, 16)
-		cipher2.Encrypt(e2, paddedPrefix)
-
-		// XOR the two encryptions
-		e := xorBytes(e1, e2)
-		// We only need the least significant bit
-		cipherBit := e[15] & 1
+		// XOR the two encryptions; reuse e1 as target
+		xorBytesTo(e1[:], e1[:], e2[:])
+		cipherBit := e1[15] & 1
 
 		// Extract the current bit from the encrypted IP
 		currentBitPos := 127 - prefixLenBits
@@ -367,20 +407,27 @@ func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
 		originalBit := cipherBit ^ encryptedBit
 
 		// Set the bit in the decrypted result
-		setBit(decrypted, currentBitPos, originalBit)
+		setBit(dst, currentBitPos, originalBit)
 
 		// Prepare padded_prefix for next iteration
 		// Shift left by 1 bit and insert the next bit from decrypted
-		paddedPrefix = shiftLeftOneBit(paddedPrefix)
+		shiftLeftOneBit(paddedPrefix)
 		setBit(paddedPrefix, 0, originalBit)
 	}
 
 	// Return the appropriate format
 	if isIPv4 {
 		// Return just the IPv4 part
-		return net.IP(decrypted[12:16]), nil
+		return net.IP(dst[12:16]), nil
 	}
-	return net.IP(decrypted), nil
+	return net.IP(dst[:16]), nil
+}
+
+// DecryptIPPfx decrypts an IP address that was encrypted using ipcrypt-pfx mode.
+// The key must be exactly 32 bytes long (split into two AES-128 keys).
+// Returns the decrypted IP address.
+func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
+	return DecryptIPPfxTo(nil, encryptedIP, key)
 }
 
 // Helper functions for bit manipulation
@@ -405,34 +452,25 @@ func setBit(data []byte, position int, value byte) {
 	}
 }
 
-// shiftLeftOneBit shifts a 16-byte array one bit to the left
-// The most significant bit is lost, and a zero bit is shifted in from the right
-func shiftLeftOneBit(data []byte) []byte {
-	if len(data) != 16 {
-		return nil
-	}
-
-	result := make([]byte, 16)
+// shiftLeftOneBit shifts a 16-byte array one bit to the left in-place.
+// The most significant bit is lost, and a zero bit is shifted in from the right.
+func shiftLeftOneBit(data []byte) {
 	carry := byte(0)
-
-	// Process from least significant byte (byte 15) to most significant (byte 0)
 	for i := 15; i >= 0; i-- {
-		// Current byte shifted left by 1, with carry from previous byte
-		result[i] = (data[i] << 1) | carry
-		// Extract the bit that will be carried to the next byte
-		carry = (data[i] >> 7) & 1
+		newCarry := (data[i] >> 7) & 1
+		data[i] = (data[i] << 1) | carry
+		carry = newCarry
 	}
-
-	return result
 }
 
 // Extended non-deterministic mode functions
 
-// EncryptIPNonDeterministicX encrypts an IP address using ipcrypt-ndx mode.
-// The key must be exactly KeySizeNDX bytes long.
+// EncryptIPNonDeterministicXTo encrypts an IP address into dst using ipcrypt-ndx mode.
+// dst must be at least TweakSizeX+16 (32) bytes; if dst is nil or too short a new
+// buffer is allocated. The key must be exactly KeySizeNDX bytes long.
 // If tweak is nil, a random tweak will be generated.
-// Returns a byte slice containing the tweak concatenated with the encrypted IP.
-func EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error) {
+// Returns dst[:32] containing tweak‖ciphertext.
+func EncryptIPNonDeterministicXTo(dst []byte, ip string, key []byte, tweak []byte) ([]byte, error) {
 	if err := validateKey(key, KeySizeNDX); err != nil {
 		return nil, err
 	}
@@ -468,38 +506,44 @@ func EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, er
 		t = tweak
 	}
 
-	encryptedTweak := make([]byte, 16)
-	block2.Encrypt(encryptedTweak, t)
-
-	xoredIP := xorBytes(ipBytes, encryptedTweak)
-	if xoredIP == nil {
-		return nil, errors.New("XOR operation failed")
+	const resultSize = TweakSizeX + 16
+	if len(dst) < resultSize {
+		dst = make([]byte, resultSize)
 	}
 
-	encrypted := make([]byte, 16)
-	block1.Encrypt(encrypted, xoredIP)
+	var encryptedTweak [16]byte
+	block2.Encrypt(encryptedTweak[:], t)
 
-	finalEncrypted := xorBytes(encrypted, encryptedTweak)
-	if finalEncrypted == nil {
-		return nil, errors.New("XOR operation failed")
-	}
+	var xored [16]byte
+	xorBytesTo(xored[:], ipBytes, encryptedTweak[:])
 
-	result := make([]byte, TweakSizeX+16)
-	copy(result[:TweakSizeX], t)
-	copy(result[TweakSizeX:], finalEncrypted)
-	return result, nil
+	var enc [16]byte
+	block1.Encrypt(enc[:], xored[:])
+
+	xorBytesTo(dst[TweakSizeX:TweakSizeX+16], enc[:], encryptedTweak[:])
+	copy(dst[:TweakSizeX], t)
+	return dst[:resultSize], nil
 }
 
-// DecryptIPNonDeterministicX decrypts an IP address that was encrypted using ipcrypt-ndx mode.
+// EncryptIPNonDeterministicX encrypts an IP address using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
-// Returns the decrypted IP address as a string.
-func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
+// If tweak is nil, a random tweak will be generated.
+// Returns a byte slice containing the tweak concatenated with the encrypted IP.
+func EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error) {
+	return EncryptIPNonDeterministicXTo(nil, ip, key, tweak)
+}
+
+// DecryptIPNonDeterministicXTo decrypts an IP address into dst using ipcrypt-ndx mode.
+// dst must be at least 16 bytes; if dst is nil or too short a new buffer is allocated.
+// The key must be exactly KeySizeNDX bytes long.
+// Returns the decrypted IP as net.IP (a sub-slice of dst).
+func DecryptIPNonDeterministicXTo(dst []byte, ciphertext, key []byte) (net.IP, error) {
 	if err := validateKey(key, KeySizeNDX); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if len(ciphertext) != TweakSizeX+16 {
-		return "", fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), TweakSizeX+16)
+		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), TweakSizeX+16)
 	}
 
 	key1 := key[:KeySizeND]
@@ -507,32 +551,41 @@ func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
 
 	block1, err := aes.NewCipher(key1)
 	if err != nil {
-		return "", fmt.Errorf("failed to create first cipher: %w", err)
+		return nil, fmt.Errorf("failed to create first cipher: %w", err)
 	}
 
 	block2, err := aes.NewCipher(key2)
 	if err != nil {
-		return "", fmt.Errorf("failed to create second cipher: %w", err)
+		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
 
-	tweak := ciphertext[:TweakSizeX]
+	twk := ciphertext[:TweakSizeX]
 	encryptedIP := ciphertext[TweakSizeX:]
 
-	encryptedTweak := make([]byte, 16)
-	block2.Encrypt(encryptedTweak, tweak)
+	var encryptedTweak [16]byte
+	block2.Encrypt(encryptedTweak[:], twk)
 
-	xoredIP := xorBytes(encryptedIP, encryptedTweak)
-	if xoredIP == nil {
-		return "", errors.New("XOR operation failed")
+	var xored [16]byte
+	xorBytesTo(xored[:], encryptedIP, encryptedTweak[:])
+
+	var dec [16]byte
+	block1.Decrypt(dec[:], xored[:])
+
+	if len(dst) < 16 {
+		dst = make([]byte, 16)
 	}
+	xorBytesTo(dst[:16], dec[:], encryptedTweak[:])
 
-	decrypted := make([]byte, 16)
-	block1.Decrypt(decrypted, xoredIP)
+	return net.IP(dst[:16]), nil
+}
 
-	finalDecrypted := xorBytes(decrypted, encryptedTweak)
-	if finalDecrypted == nil {
-		return "", errors.New("XOR operation failed")
+// DecryptIPNonDeterministicX decrypts an IP address that was encrypted using ipcrypt-ndx mode.
+// The key must be exactly KeySizeNDX bytes long.
+// Returns the decrypted IP address as a string.
+func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
+	ip, err := DecryptIPNonDeterministicXTo(nil, ciphertext, key)
+	if err != nil {
+		return "", err
 	}
-
-	return net.IP(finalDecrypted).String(), nil
+	return ip.String(), nil
 }
