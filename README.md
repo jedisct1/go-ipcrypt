@@ -109,6 +109,32 @@ func main() {
 }
 ```
 
+### Hot-path: cached ciphers
+
+For repeated operations with the same key, create a cached cipher once and
+reuse it. This is the preferred API for hot paths — `*To` methods let you
+control allocations entirely:
+
+```go
+// Hot-path: reuse a cached cipher for repeated operations
+c, err := ipcrypt.NewDeterministicCipher(key)
+if err != nil {
+    panic(err)
+}
+
+buf := make([]byte, 16)
+for _, ip := range ips {
+    encrypted, err := c.EncryptIPTo(buf, ip)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Encrypted: %s\n", encrypted)
+}
+```
+
+The top-level functions (`EncryptIP`, `EncryptIPNonDeterministic`, etc.) remain
+perfectly fine for occasional one-shot calls.
+
 ## API Reference
 
 ### Constants
@@ -160,3 +186,46 @@ For IPv4, `dst` must still be ≥ 16 bytes; the returned `net.IP` is `dst[12:16]
 
 - `KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error)` — Encrypts a 16-byte block with KIASU-BC
 - `KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error)` — Decrypts a 16-byte block with KIASU-BC
+
+### Cached Cipher Types
+
+For repeated operations with the same key the cached cipher types are the
+preferred API. Construct one with the appropriate `New*` function, then call
+methods on it — the key material is expanded once and reused across calls.
+All cached types are safe for concurrent use.
+
+#### DeterministicCipher
+
+Created via `NewDeterministicCipher(key []byte) (*DeterministicCipher, error)`.
+
+- `EncryptIPTo(dst []byte, ip net.IP) (net.IP, error)`
+- `EncryptIP(ip net.IP) (net.IP, error)`
+- `DecryptIPTo(dst []byte, encrypted net.IP) (net.IP, error)`
+- `DecryptIP(encrypted net.IP) (net.IP, error)`
+
+#### NonDeterministicCipher
+
+Created via `NewNonDeterministicCipher(key []byte) (*NonDeterministicCipher, error)`.
+
+- `EncryptIPTo(dst []byte, ip string, tweak []byte) ([]byte, error)`
+- `EncryptIP(ip string, tweak []byte) ([]byte, error)`
+- `DecryptIPTo(dst []byte, ciphertext []byte) (net.IP, error)`
+- `DecryptIP(ciphertext []byte) (string, error)`
+
+#### NonDeterministicXCipher
+
+Created via `NewNonDeterministicXCipher(key []byte) (*NonDeterministicXCipher, error)`.
+
+- `EncryptIPTo(dst []byte, ip string, tweak []byte) ([]byte, error)`
+- `EncryptIP(ip string, tweak []byte) ([]byte, error)`
+- `DecryptIPTo(dst []byte, ciphertext []byte) (net.IP, error)`
+- `DecryptIP(ciphertext []byte) (string, error)`
+
+#### PfxCipher
+
+Created via `NewPfxCipher(key []byte) (*PfxCipher, error)`.
+
+- `EncryptIPTo(dst []byte, ip net.IP) (net.IP, error)`
+- `EncryptIP(ip net.IP) (net.IP, error)`
+- `DecryptIPTo(dst []byte, encryptedIP net.IP) (net.IP, error)`
+- `DecryptIP(encryptedIP net.IP) (net.IP, error)`
