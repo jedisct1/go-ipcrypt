@@ -975,7 +975,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range deterministicCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					ip, err := EncryptIP(tc.key, tc.ip)
 					if err != nil {
 						b.Fatal(err)
@@ -995,7 +995,7 @@ func BenchmarkAllocations(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					ip, err := EncryptIPTo(tc.key, tc.ip, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1010,7 +1010,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range deterministicCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					ip, err := DecryptIP(tc.key, tc.cipherIP)
 					if err != nil {
 						b.Fatal(err)
@@ -1030,7 +1030,7 @@ func BenchmarkAllocations(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					ip, err := DecryptIPTo(tc.key, tc.cipherIP, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1045,7 +1045,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range ndCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := EncryptIPNonDeterministic(tc.ipString, tc.key, tc.tweak)
 					if err != nil {
 						b.Fatal(err)
@@ -1062,7 +1062,7 @@ func BenchmarkAllocations(b *testing.B) {
 				buf := make([]byte, NonDeterministicSize)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := EncryptIPNonDeterministicTo(tc.ip, tc.key, tc.tweak, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1077,7 +1077,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range ndCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := DecryptIPNonDeterministic(tc.ciphertext, tc.key)
 					if err != nil {
 						b.Fatal(err)
@@ -1094,7 +1094,7 @@ func BenchmarkAllocations(b *testing.B) {
 				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := DecryptIPNonDeterministicTo(tc.ciphertext, tc.key, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1109,7 +1109,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range ndxCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := EncryptIPNonDeterministicX(tc.ipString, tc.key, tc.tweak)
 					if err != nil {
 						b.Fatal(err)
@@ -1126,7 +1126,7 @@ func BenchmarkAllocations(b *testing.B) {
 				buf := make([]byte, NonDeterministicXSize)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := EncryptIPNonDeterministicXTo(tc.ip, tc.key, tc.tweak, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1141,7 +1141,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range ndxCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := DecryptIPNonDeterministicX(tc.ciphertext, tc.key)
 					if err != nil {
 						b.Fatal(err)
@@ -1158,7 +1158,7 @@ func BenchmarkAllocations(b *testing.B) {
 				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := DecryptIPNonDeterministicXTo(tc.ciphertext, tc.key, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1173,7 +1173,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range pfxCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := EncryptIPPfx(tc.ip, tc.key)
 					if err != nil {
 						b.Fatal(err)
@@ -1190,7 +1190,7 @@ func BenchmarkAllocations(b *testing.B) {
 				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := EncryptIPPfxTo(tc.ip, tc.key, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
@@ -1205,7 +1205,7 @@ func BenchmarkAllocations(b *testing.B) {
 		for _, tc := range pfxCases {
 			b.Run(tc.name, func(b *testing.B) {
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := DecryptIPPfx(tc.cipherIP, tc.key)
 					if err != nil {
 						b.Fatal(err)
@@ -1222,7 +1222,7 @@ func BenchmarkAllocations(b *testing.B) {
 				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
-				for b.Loop() {
+				for i := 0; i < b.N; i++ {
 					out, err := DecryptIPPfxTo(tc.cipherIP, tc.key, buf, scratch)
 					if err != nil {
 						b.Fatal(err)
