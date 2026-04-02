@@ -78,6 +78,21 @@ func main() {
         panic(err)
     }
     fmt.Printf("Extended non-deterministic decrypted: %s\n", decryptedX)
+
+    // ipcrypt-pfx mode
+    pfxKey := make([]byte, ipcrypt.KeySizePFX)
+    rand.Read(pfxKey)
+
+    encryptedPFX, err := ipcrypt.EncryptIPPfx(ip, pfxKey)
+    if err != nil {
+        panic(err)
+    }
+
+    decryptedPFX, err := ipcrypt.DecryptIPPfx(encryptedPFX, pfxKey)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Prefix-preserving decrypted: %s\n", decryptedPFX)
 }
 ```
 
