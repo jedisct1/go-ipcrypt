@@ -54,10 +54,10 @@ var (
 
 // ScratchPad enables reuse of byte slices during encryption and decryption operations to avoid allocations
 type ScratchPad struct {
-	Scratch1 [MaxScratchSize]byte
-	Scratch2 [MaxScratchSize]byte
-	Scratch3 [MaxScratchSize]byte
-	Scratch4 [MaxScratchSize]byte
+	scratch1 [MaxScratchSize]byte
+	scratch2 [MaxScratchSize]byte
+	scratch3 [MaxScratchSize]byte
+	scratch4 [MaxScratchSize]byte
 
 	keySlot1 [aes.BlockSize]byte
 	keySlot2 [aes.BlockSize]byte
@@ -221,10 +221,10 @@ func EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (
 
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
-		if err := validateIPTo(ip, scratch.Scratch1[:MaxIPSize]); err != nil {
+		if err := validateIPTo(ip, scratch.scratch1[:MaxIPSize]); err != nil {
 			return nil, err
 		}
-		ipBytes = encrypted[:MaxIPSize]
+		ipBytes = scratch.scratch1[:MaxIPSize]
 	}
 
 	block, err := scratch.getAESBlock(1, key)
@@ -266,10 +266,10 @@ func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *Scratc
 
 	ipBytes := []byte(encrypted)
 	if len(encrypted) != net.IPv6len {
-		if err := validateIPTo(encrypted, scratch.Scratch1[:MaxIPSize]); err != nil {
+		if err := validateIPTo(encrypted, scratch.scratch1[:MaxIPSize]); err != nil {
 			return nil, err
 		}
-		ipBytes = decrypted[:MaxIPSize]
+		ipBytes = scratch.scratch1[:MaxIPSize]
 	}
 
 	block, err := scratch.getAESBlock(1, key)
@@ -314,10 +314,10 @@ func EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted 
 
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
-		if err := validateIPTo(ip, scratch.Scratch1[:MaxIPSize]); err != nil {
+		if err := validateIPTo(ip, scratch.scratch1[:MaxIPSize]); err != nil {
 			return nil, err
 		}
-		ipBytes = scratch.Scratch1[:MaxIPSize]
+		ipBytes = scratch.scratch1[:MaxIPSize]
 	}
 
 	var t []byte
@@ -335,7 +335,7 @@ func EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted 
 	}
 
 	roundKeys := scratch.getRoundKeys(1, key)
-	if err := kiasuBCEncryptTo(roundKeys, t, ipBytes, encrypted[TweakSize:], scratch.Scratch1[:]); err != nil {
+	if err := kiasuBCEncryptTo(roundKeys, t, ipBytes, encrypted[TweakSize:], scratch.scratch1[:]); err != nil {
 		return nil, err
 	}
 	return encrypted[:NonDeterministicSize], nil
@@ -377,7 +377,7 @@ func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte
 	encryptedIP := ciphertext[TweakSize:]
 
 	roundKeys := scratch.getRoundKeys(1, key)
-	if err := kiasuBCDecryptTo(roundKeys, tweak, encryptedIP, decrypted, scratch.Scratch1[:]); err != nil {
+	if err := kiasuBCDecryptTo(roundKeys, tweak, encryptedIP, decrypted, scratch.scratch1[:]); err != nil {
 		return nil, err
 	}
 	return net.IP(decrypted[:MaxIPSize]), nil
@@ -447,9 +447,7 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 	if err := validateOutputLength(encrypted, MaxIPSize, "encrypted"); err != nil {
 		return nil, err
 	}
-
-	encrypted = encrypted[:MaxIPSize]
-
+	
 	// Determine starting point
 	prefixStart := 0
 	if isIPv4 {
@@ -458,7 +456,7 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 	}
 
 	// Initialize padded prefix for the starting prefix length
-	paddedPrefix := scratch.Scratch1[:]
+	paddedPrefix := scratch.scratch1[:]
 	if isIPv4 {
 		copy(paddedPrefix, pfxIPv4PaddedPrefix[:])
 	} else {
@@ -468,14 +466,14 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 	// Process each bit position
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
 		// Compute pseudorandom function with dual AES encryption
-		e1 := scratch.Scratch2[:]
+		e1 := scratch.scratch2[:]
 		cipher1.Encrypt(e1, paddedPrefix)
 
-		e2 := scratch.Scratch3[:]
+		e2 := scratch.scratch3[:]
 		cipher2.Encrypt(e2, paddedPrefix)
 
 		// XOR the two encryptions
-		e := xorBytesTo(e1, e2, scratch.Scratch4[:])
+		e := xorBytesTo(e1, e2, scratch.scratch4[:])
 		// We only need the least significant bit
 		cipherBit := e[15] & 1
 
@@ -499,6 +497,9 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
 // Returns the encrypted IP address maintaining the original format (IPv4 or IPv6).
 func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
+	}
 	encrypted := make([]byte, MaxIPSize)
 	scratch := ScratchPad{}
 	return EncryptIPPfxTo(ip, key, encrypted, &scratch)
@@ -553,8 +554,6 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 		return nil, fmt.Errorf("failed to create second cipher: %w", err)
 	}
 
-	decrypted = decrypted[:MaxIPSize]
-
 	// Determine starting point
 	prefixStart := 0
 	if isIPv4 {
@@ -563,7 +562,7 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 	}
 
 	// Initialize padded prefix for the starting prefix length
-	paddedPrefix := scratch.Scratch1[:]
+	paddedPrefix := scratch.scratch1[:]
 	if isIPv4 {
 		copy(paddedPrefix, pfxIPv4PaddedPrefix[:])
 	} else {
@@ -573,14 +572,14 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 	// Process each bit position
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
 		// Compute pseudorandom function with dual AES encryption
-		e1 := scratch.Scratch2[:]
+		e1 := scratch.scratch2[:]
 		cipher1.Encrypt(e1, paddedPrefix)
 
-		e2 := scratch.Scratch3[:]
+		e2 := scratch.scratch3[:]
 		cipher2.Encrypt(e2, paddedPrefix)
 
 		// XOR the two encryptions
-		e := xorBytesTo(e1, e2, scratch.Scratch4[:])
+		e := xorBytesTo(e1, e2, scratch.scratch4[:])
 		// We only need the least significant bit
 		cipherBit := e[15] & 1
 
@@ -672,10 +671,10 @@ func EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted
 	}
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
-		if err := validateIPTo(ip, scratch.Scratch4[:]); err != nil {
+		if err := validateIPTo(ip, scratch.scratch4[:]); err != nil {
 			return nil, err
 		}
-		ipBytes = scratch.Scratch4[:]
+		ipBytes = scratch.scratch4[:]
 	}
 
 	key1 := key[:KeySizeND]
@@ -705,17 +704,17 @@ func EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted
 		copy(encrypted[:TweakSizeX], t)
 	}
 
-	encryptedTweak := scratch.Scratch1[:]
+	encryptedTweak := scratch.scratch1[:]
 	block2.Encrypt(encryptedTweak, t)
 
-	xoredIP := xorBytesTo(ipBytes, encryptedTweak, scratch.Scratch2[:])
+	xoredIP := xorBytesTo(ipBytes, encryptedTweak, scratch.scratch2[:])
 	if xoredIP == nil {
 		return nil, errors.New("XOR operation failed")
 	}
 
 	block1.Encrypt(encrypted[TweakSizeX:], xoredIP)
 
-	finalEncrypted := xorBytesTo(encrypted[TweakSizeX:], encryptedTweak, scratch.Scratch3[:])
+	finalEncrypted := xorBytesTo(encrypted[TweakSizeX:], encryptedTweak, scratch.scratch3[:])
 	if finalEncrypted == nil {
 		return nil, errors.New("XOR operation failed")
 	}
@@ -772,17 +771,17 @@ func DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byt
 	tweak := ciphertext[:TweakSizeX]
 	encryptedIP := ciphertext[TweakSizeX:]
 
-	encryptedTweak := scratch.Scratch1[:]
+	encryptedTweak := scratch.scratch1[:]
 	block2.Encrypt(encryptedTweak, tweak)
 
-	xoredIP := xorBytesTo(encryptedIP, encryptedTweak, scratch.Scratch2[:])
+	xoredIP := xorBytesTo(encryptedIP, encryptedTweak, scratch.scratch2[:])
 	if xoredIP == nil {
 		return nil, errors.New("XOR operation failed")
 	}
 
 	block1.Decrypt(decrypted, xoredIP)
 
-	finalDecrypted := xorBytesTo(decrypted, encryptedTweak, scratch.Scratch3[:])
+	finalDecrypted := xorBytesTo(decrypted, encryptedTweak, scratch.scratch3[:])
 	if finalDecrypted == nil {
 		return nil, errors.New("XOR operation failed")
 	}
