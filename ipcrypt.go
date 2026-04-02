@@ -33,15 +33,14 @@ const (
 
 // Max length of an encrypted or decrypted IP address
 const (
-	MaxIPSize             = 16 // Maximum size of an encrypted IP address in bytes
-	MaxScratchSize        = 16 // Maximum scratch buffer size in bytes
-	NonDeterministicSize  = TweakSize + MaxIPSize
-	NonDeterministicXSize = TweakSizeX + MaxIPSize
+	MaxScratchSize        = net.IPv6len // Maximum scratch buffer size in bytes
+	NonDeterministicSize  = TweakSize + net.IPv6len
+	NonDeterministicXSize = TweakSizeX + net.IPv6len
 )
 
 var (
-	pfxIPv4PaddedPrefix = [MaxIPSize]byte{3: 0x01, 14: 0xFF, 15: 0xFF}
-	pfxIPv6PaddedPrefix = [MaxIPSize]byte{15: 0x01}
+	pfxIPv4PaddedPrefix = [net.IPv6len]byte{3: 0x01, 14: 0xFF, 15: 0xFF}
+	pfxIPv6PaddedPrefix = [net.IPv6len]byte{15: 0x01}
 	ipv4MappedPrefix    = [12]byte{10: 0xFF, 11: 0xFF}
 )
 
@@ -193,8 +192,8 @@ func xorBytes(a, b []byte) []byte {
 }
 
 func validateOutputLength(buf []byte, expectedSize int, parameterName string) error {
-	if len(buf) < expectedSize {
-		return fmt.Errorf("invalid %s parameter: got %d bytes, want at least %d bytes", parameterName, len(buf), expectedSize)
+	if len(buf) != expectedSize {
+		return fmt.Errorf("invalid %s parameter: got %d bytes, want %d bytes", parameterName, len(buf), expectedSize)
 	}
 	return nil
 }
@@ -203,7 +202,7 @@ func validateOutputLength(buf []byte, expectedSize int, parameterName string) er
 
 // EncryptIPTo EncryptIP encrypts an IP address using ipcrypt-deterministic mode.
 // The key must be exactly KeySizeDeterministic bytes long.
-// The encrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The encrypted parameter must be exactly net.IPv6len bytes long.
 // The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the encrypted IP address as a net.IP.
 func EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (net.IP, error) {
@@ -215,16 +214,16 @@ func EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (
 		return nil, err
 	}
 
-	if err := validateOutputLength(encrypted, MaxIPSize, "encrypted"); err != nil {
+	if err := validateOutputLength(encrypted, net.IPv6len, "encrypted"); err != nil {
 		return nil, err
 	}
 
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
-		if err := validateIPTo(ip, encrypted[:MaxIPSize]); err != nil {
+		if err := validateIPTo(ip, encrypted[:net.IPv6len]); err != nil {
 			return nil, err
 		}
-		ipBytes = encrypted[:MaxIPSize]
+		ipBytes = encrypted[:net.IPv6len]
 	}
 
 	block, err := scratch.getAESBlock(1, key)
@@ -248,7 +247,7 @@ func EncryptIP(key []byte, ip net.IP) (net.IP, error) {
 
 // DecryptIPTo DecryptIP decrypts an IP address that was encrypted using ipcrypt-deterministic mode.
 // The key must be exactly KeySizeDeterministic bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The decrypted parameter must be exactly net.IPv6len bytes long.
 // The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the decrypted IP address as a net.IP.
 func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
@@ -260,16 +259,16 @@ func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *Scratc
 		return nil, err
 	}
 
-	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, net.IPv6len, "decrypted"); err != nil {
 		return nil, err
 	}
 
 	ipBytes := []byte(encrypted)
 	if len(encrypted) != net.IPv6len {
-		if err := validateIPTo(encrypted, decrypted[:MaxIPSize]); err != nil {
+		if err := validateIPTo(encrypted, decrypted[:net.IPv6len]); err != nil {
 			return nil, err
 		}
-		ipBytes = decrypted[:MaxIPSize]
+		ipBytes = decrypted[:net.IPv6len]
 	}
 
 	block, err := scratch.getAESBlock(1, key)
@@ -296,7 +295,7 @@ func DecryptIP(key []byte, encrypted net.IP) (net.IP, error) {
 // EncryptIPNonDeterministicTo EncryptIPNonDeterministic encrypts an IP address using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
 // If tweak is nil, a random tweak will be generated.
-// The encrypted parameter must be a byte slice of minimum NonDeterministicSize bytes long.
+// The encrypted parameter must be exactly NonDeterministicSize bytes long.
 // The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns a byte slice containing the tweak concatenated with the encrypted IP.
 func EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error) {
@@ -314,10 +313,10 @@ func EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted 
 
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
-		if err := validateIPTo(ip, scratch.scratch1[:MaxIPSize]); err != nil {
+		if err := validateIPTo(ip, scratch.scratch1[:net.IPv6len]); err != nil {
 			return nil, err
 		}
-		ipBytes = scratch.scratch1[:MaxIPSize]
+		ipBytes = scratch.scratch1[:net.IPv6len]
 	}
 
 	var t []byte
@@ -353,7 +352,7 @@ func EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, err
 
 // DecryptIPNonDeterministicTo decrypts an IP address that was encrypted using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The decrypted parameter must be exactly net.IPv6len bytes long.
 // The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the decrypted IP address as a net.IP.
 func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
@@ -369,7 +368,7 @@ func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte
 		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), NonDeterministicSize)
 	}
 
-	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, net.IPv6len, "decrypted"); err != nil {
 		return nil, err
 	}
 
@@ -380,14 +379,14 @@ func DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte
 	if err := kiasuBCDecryptTo(roundKeys, tweak, encryptedIP, decrypted, scratch.scratch1[:]); err != nil {
 		return nil, err
 	}
-	return net.IP(decrypted[:MaxIPSize]), nil
+	return net.IP(decrypted[:net.IPv6len]), nil
 }
 
 // DecryptIPNonDeterministic decrypts an IP address that was encrypted using ipcrypt-nd mode.
 // The key must be exactly KeySizeND bytes long.
 // Returns the decrypted IP address as a string.
 func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
-	decrypted := make([]byte, MaxIPSize)
+	decrypted := make([]byte, net.IPv6len)
 	scratch := ScratchPad{}
 	ip, err := DecryptIPNonDeterministicTo(ciphertext, key, decrypted, &scratch)
 	if err != nil {
@@ -401,9 +400,11 @@ func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
 
 // EncryptIPPfxTo encrypts an IP address using ipcrypt-pfx mode.
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
-// The encrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The encrypted parameter must be exactly net.IPv4len bytes for IPv4 inputs or exactly
+// net.IPv6len bytes for IPv6 inputs.
 // The scratch parameter provides reusable state to avoid allocations across calls.
-// Returns the encrypted IP address in 16-byte form.
+// Returns the encrypted IP address in net.IPv4len-byte form for IPv4 callers using a net.IPv4len-byte
+// destination buffer, or 16-byte form otherwise.
 func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if scratch == nil {
 		return nil, errors.New("scratch parameter must not be nil")
@@ -422,7 +423,7 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 		return nil, errors.New("the two halves of the key must be different")
 	}
 
-	var ip16 [MaxIPSize]byte
+	var ip16 [net.IPv6len]byte
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
 		if err := validateIPTo(ip, ip16[:]); err != nil {
@@ -444,15 +445,28 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 
 	// Determine if this is IPv4
 	isIPv4 := ip.To4() != nil
-	if err := validateOutputLength(encrypted, MaxIPSize, "encrypted"); err != nil {
-		return nil, err
+	encryptedBits := encrypted
+	if isIPv4 {
+		switch len(encrypted) {
+		case net.IPv6len:
+			encryptedBits = encrypted[:net.IPv6len]
+			copy(encryptedBits[:12], ipv4MappedPrefix[:])
+		case net.IPv4len:
+			encryptedBits = encrypted[:net.IPv4len]
+		default:
+			return nil, fmt.Errorf("invalid encrypted parameter: got %d bytes, want %d bytes for IPv4 or %d bytes for IPv6", len(encrypted), net.IPv4len, net.IPv6len)
+		}
+	} else {
+		if err := validateOutputLength(encrypted, net.IPv6len, "encrypted"); err != nil {
+			return nil, err
+		}
+		encryptedBits = encrypted[:net.IPv6len]
 	}
 
 	// Determine starting point
 	prefixStart := 0
 	if isIPv4 {
 		prefixStart = 96
-		copy(encrypted[:12], ipv4MappedPrefix[:])
 	}
 
 	// Initialize padded prefix for the starting prefix length
@@ -482,7 +496,7 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 		originalBit := getBit(ipBytes, currentBitPos)
 
 		// Set the bit in the encrypted result
-		setBit(encrypted, currentBitPos, cipherBit^originalBit)
+		setBit(encryptedBits, currentBitPos, cipherBit^originalBit)
 
 		// Prepare padded_prefix for next iteration
 		// Shift left by 1 bit and insert the next bit from ipBytes
@@ -490,7 +504,7 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 		setBit(paddedPrefix, 0, originalBit)
 	}
 
-	return net.IP(encrypted), nil
+	return net.IP(encryptedBits), nil
 }
 
 // EncryptIPPfx encrypts an IP address using ipcrypt-pfx mode.
@@ -500,16 +514,26 @@ func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
 	}
-	encrypted := make([]byte, MaxIPSize)
+	var encrypted []byte
+	switch len(ip) {
+	case net.IPv6len:
+		encrypted = make([]byte, net.IPv6len)
+	case net.IPv4len:
+		encrypted = make([]byte, net.IPv4len)
+	default:
+		return nil, fmt.Errorf("invalid ip parameter length (%d bytes) - must be either %d bytes or %d bytes", len(ip), net.IPv4len, net.IPv6len)
+	}
 	scratch := ScratchPad{}
 	return EncryptIPPfxTo(ip, key, encrypted, &scratch)
 }
 
 // DecryptIPPfxTo decrypts an IP address that was encrypted using ipcrypt-pfx mode.
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
-// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The decrypted parameter must be exactly net.IPv4len bytes for IPv4 inputs or exactly
+// net.IPv6len bytes for IPv6 inputs.
 // The scratch parameter provides reusable state to avoid allocations across calls.
-// Returns the decrypted IP address.
+// Returns the decrypted IP address in net.IPv4len-byte form for IPv4 callers using a net.IPv4len-byte
+// destination buffer, or 16-byte form otherwise.
 func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
 	if scratch == nil {
 		return nil, errors.New("scratch parameter must not be nil")
@@ -531,12 +555,28 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 	// Keep IPv4 ciphertexts in their IPv4 code path, but normalize them to
 	// the 16-byte IPv4-mapped form before the bitwise decryption loop.
 	isIPv4 := encryptedIP.To4() != nil
-	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
-		return nil, err
+	decryptedBits := decrypted
+	if isIPv4 {
+		switch len(decrypted) {
+		case net.IPv6len:
+			decryptedBits = decrypted[:net.IPv6len]
+			copy(decryptedBits[:12], ipv4MappedPrefix[:])
+		case net.IPv4len:
+			decryptedBits = decrypted[:net.IPv4len]
+		default:
+			return nil, fmt.Errorf("invalid decrypted parameter: got %d bytes, want %d bytes for IPv4 or %d bytes for IPv6", len(decrypted), net.IPv4len, net.IPv6len)
+		}
+	} else {
+		if err := validateOutputLength(decrypted, net.IPv6len, "decrypted"); err != nil {
+			return nil, err
+		}
+		decryptedBits = decrypted[:net.IPv6len]
 	}
-	var encryptedIP16 [MaxIPSize]byte
+	var encryptedIP16 [net.IPv6len]byte
 	encryptedBytes := []byte(encryptedIP)
-	if len(encryptedIP) != net.IPv6len {
+	if isIPv4 && len(encryptedIP) == net.IPv4len {
+		encryptedBytes = encryptedIP
+	} else if len(encryptedIP) != net.IPv6len {
 		if err := validateIPTo(encryptedIP, encryptedIP16[:]); err != nil {
 			return nil, err
 		}
@@ -558,7 +598,6 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 	prefixStart := 0
 	if isIPv4 {
 		prefixStart = 96
-		copy(decrypted[:12], ipv4MappedPrefix[:])
 	}
 
 	// Initialize padded prefix for the starting prefix length
@@ -589,7 +628,7 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 		originalBit := cipherBit ^ encryptedBit
 
 		// Set the bit in the decrypted result
-		setBit(decrypted, currentBitPos, originalBit)
+		setBit(decryptedBits, currentBitPos, originalBit)
 
 		// Prepare padded_prefix for next iteration
 		// Shift left by 1 bit and insert the next bit from decrypted
@@ -597,32 +636,40 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 		setBit(paddedPrefix, 0, originalBit)
 	}
 
-	return net.IP(decrypted), nil
+	return net.IP(decryptedBits), nil
 }
 
 // DecryptIPPfx decrypts an IP address that was encrypted using ipcrypt-pfx mode.
 // The key must be exactly 32 bytes long (split into two AES-128 keys).
 // Returns the decrypted IP address.
 func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
-	decrypted := make([]byte, MaxIPSize)
+	var decrypted []byte
+	switch len(encryptedIP) {
+	case net.IPv6len:
+		decrypted = make([]byte, net.IPv6len)
+	case net.IPv4len:
+		decrypted = make([]byte, net.IPv4len)
+	default:
+		return nil, fmt.Errorf("invalid encryptedIP parameter length (%d bytes) - must be either %d bytes or %d bytes", len(encryptedIP), net.IPv4len, net.IPv6len)
+	}
 	scratch := ScratchPad{}
 	return DecryptIPPfxTo(encryptedIP, key, decrypted, &scratch)
 }
 
 // Helper functions for bit manipulation
 
-// getBit extracts bit at position from 16-byte array
-// position: 0 = LSB of byte 15, 127 = MSB of byte 0
+// getBit extracts a bit at position from the supplied byte slice.
+// position: 0 = LSB of the final byte, len(data)*8-1 = MSB of the first byte.
 func getBit(data []byte, position int) byte {
-	byteIndex := 15 - (position / 8)
+	byteIndex := len(data) - 1 - (position / 8)
 	bitIndex := position % 8
 	return (data[byteIndex] >> bitIndex) & 1
 }
 
-// setBit sets bit at position in 16-byte array
-// position: 0 = LSB of byte 15, 127 = MSB of byte 0
+// setBit sets a bit at position in the supplied byte slice.
+// position: 0 = LSB of the final byte, len(data)*8-1 = MSB of the first byte.
 func setBit(data []byte, position int, value byte) {
-	byteIndex := 15 - (position / 8)
+	byteIndex := len(data) - 1 - (position / 8)
 	bitIndex := position % 8
 	if value != 0 {
 		data[byteIndex] |= 1 << bitIndex
@@ -655,7 +702,7 @@ func shiftLeftOneBit(data []byte) {
 // EncryptIPNonDeterministicXTo encrypts an IP address using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
 // If tweak is nil, a random tweak will be generated.
-// The encrypted parameter must be a byte slice of minimum NonDeterministicXSize bytes long.
+// The encrypted parameter must be exactly NonDeterministicXSize bytes long.
 // The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns a byte slice containing the tweak concatenated with the encrypted IP.
 func EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error) {
@@ -735,7 +782,7 @@ func EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, er
 
 // DecryptIPNonDeterministicXTo decrypts an IP address that was encrypted using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
-// The decrypted parameter must be a byte slice of minimum MaxIPSize bytes long.
+// The decrypted parameter must be exactly net.IPv6len bytes long.
 // The scratch parameter provides reusable state to avoid allocations across calls.
 // Returns the decrypted IP address as a net.IP.
 func DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error) {
@@ -751,7 +798,7 @@ func DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byt
 		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), NonDeterministicXSize)
 	}
 
-	if err := validateOutputLength(decrypted, MaxIPSize, "decrypted"); err != nil {
+	if err := validateOutputLength(decrypted, net.IPv6len, "decrypted"); err != nil {
 		return nil, err
 	}
 
@@ -787,14 +834,14 @@ func DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byt
 	}
 
 	copy(decrypted, finalDecrypted)
-	return net.IP(decrypted[:MaxIPSize]), nil
+	return net.IP(decrypted[:net.IPv6len]), nil
 }
 
 // DecryptIPNonDeterministicX decrypts an IP address that was encrypted using ipcrypt-ndx mode.
 // The key must be exactly KeySizeNDX bytes long.
 // Returns the decrypted IP address as a string.
 func DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error) {
-	decrypted := make([]byte, MaxIPSize)
+	decrypted := make([]byte, net.IPv6len)
 	scratch := ScratchPad{}
 	ip, err := DecryptIPNonDeterministicXTo(ciphertext, key, decrypted, &scratch)
 	if err != nil {

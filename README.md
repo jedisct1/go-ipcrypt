@@ -90,9 +90,8 @@ func main() {
 - `KeySizeNDX`: 32 bytes (ipcrypt-ndx)
 - `TweakSize`: 8 bytes (ipcrypt-nd tweak)
 - `TweakSizeX`: 16 bytes (ipcrypt-ndx tweak)
-- `MaxIPSize`: 16 bytes
-- `NonDeterministicSize`: 24 bytes (`TweakSize + MaxIPSize`)
-- `NonDeterministicXSize`: 32 bytes (`TweakSizeX + MaxIPSize`)
+- `NonDeterministicSize`: 24 bytes (`TweakSize + net.IPv6len`)
+- `NonDeterministicXSize`: 32 bytes (`TweakSizeX + net.IPv6len`)
 
 ### Types
 
@@ -104,26 +103,26 @@ func main() {
 #### Deterministic Mode
 - `EncryptIP(key []byte, ip net.IP) (net.IP, error)` - Encrypts an IP address deterministically
 - `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` - Decrypts an IP address deterministically
-- `EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic encryption into a preallocated buffer of at least `MaxIPSize` bytes
-- `DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic decryption into a preallocated buffer of at least `MaxIPSize` bytes
+- `EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic encryption into a preallocated buffer of exactly `net.IPv6len` bytes
+- `DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic decryption into a preallocated buffer of exactly `net.IPv6len` bytes
 
 #### Prefix-Preserving Mode (ipcrypt-pfx)
 - `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation
 - `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation
-- `EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving encryption into a preallocated buffer of at least `MaxIPSize` bytes
-- `DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving decryption into a preallocated buffer of at least `MaxIPSize` bytes
+- `EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving encryption into a preallocated buffer of exactly `net.IPv4len` bytes for IPv4 or exactly `net.IPv6len` bytes for IPv6
+- `DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving decryption into a preallocated buffer of exactly `net.IPv4len` bytes for IPv4 or exactly `net.IPv6len` bytes for IPv6
 
 #### Non-Deterministic Mode (ipcrypt-nd)
 - `EncryptIPNonDeterministic(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 8-byte tweak
 - `DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-nd ciphertext
-- `EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Zero-allocation encryption into a preallocated buffer of at least `NonDeterministicSize` bytes
-- `DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation decryption into a preallocated buffer of at least `MaxIPSize` bytes
+- `EncryptIPNonDeterministicTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Zero-allocation encryption into a preallocated buffer of exactly `NonDeterministicSize` bytes
+- `DecryptIPNonDeterministicTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation decryption into a preallocated buffer of exactly `net.IPv6len` bytes
 
 #### Extended Non-Deterministic Mode (ipcrypt-ndx)
 - `EncryptIPNonDeterministicX(ip string, key []byte, tweak []byte) ([]byte, error)` - Encrypts with 16-byte tweak
 - `DecryptIPNonDeterministicX(ciphertext []byte, key []byte) (string, error)` - Decrypts ipcrypt-ndx ciphertext
-- `EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Zero-allocation encryption into a preallocated buffer of at least `NonDeterministicXSize` bytes
-- `DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation decryption into a preallocated buffer of at least `MaxIPSize` bytes
+- `EncryptIPNonDeterministicXTo(ip net.IP, key []byte, tweak []byte, encrypted []byte, scratch *ScratchPad) ([]byte, error)` - Zero-allocation encryption into a preallocated buffer of exactly `NonDeterministicXSize` bytes
+- `DecryptIPNonDeterministicXTo(ciphertext []byte, key []byte, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation decryption into a preallocated buffer of exactly `net.IPv6len` bytes
 
 ## Zero-Allocation Usage
 
@@ -131,7 +130,7 @@ The `To` functions write into caller-provided buffers and take a reusable `Scrat
 
 ```go
 scratch := ipcrypt.NewScratchPad()
-buf := make([]byte, ipcrypt.MaxIPSize)
+buf := make([]byte, net.IPv6len) // Use net.IPv4len for IPv4-only callers.
 
 for ip := range ips {
     encrypted, err := ipcrypt.EncryptIPPfxTo(ip, key, buf, scratch)
@@ -142,7 +141,9 @@ for ip := range ips {
 }
 ```
 
-Note that the scratch pad must be initialized before use. _Also, you cannot reuse the same scratch pad across different keys._
+Note that the scratch pad must be initialized before use. It is safe to reuse the same scratch pad across different keys, 
+but cached cipher state will be rebuilt when the key changes, so you get the best performance when reusing it with the 
+same key. A `ScratchPad` must not be shared concurrently across goroutines without external synchronization.
 
 ## Performance
 

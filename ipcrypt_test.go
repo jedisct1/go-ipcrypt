@@ -21,6 +21,23 @@ type testVector struct {
 	output  string
 }
 
+func mustParseIPPreserveWidth(t testing.TB, s string) net.IP {
+	t.Helper()
+
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		t.Fatalf("invalid IP address: %s", s)
+	}
+
+	if addr.Is4() {
+		ip := addr.As4()
+		return net.IP(ip[:])
+	}
+
+	ip := addr.As16()
+	return net.IP(ip[:])
+}
+
 var testVectors = []testVector{
 	// ipcrypt-deterministic test vectors
 	{
@@ -138,10 +155,7 @@ func TestReferenceVectors(t *testing.T) {
 	for _, tv := range testVectors {
 		t.Run(tv.variant+"/"+tv.ip, func(t *testing.T) {
 			// Parse input IP
-			ip := net.ParseIP(tv.ip)
-			if ip == nil {
-				t.Fatalf("Invalid IP address: %s", tv.ip)
-			}
+			ip := mustParseIPPreserveWidth(t, tv.ip)
 
 			// Parse key
 			key, err := hex.DecodeString(tv.key)
@@ -466,7 +480,7 @@ func TestIPNonDeterministicX(t *testing.T) {
 // generateRandomIP generates a random IPv4 address.
 func generateRandomIP(t *testing.T) string {
 	t.Helper()
-	b := make([]byte, 4)
+	b := make([]byte, net.IPv4len)
 	if _, err := rand.Read(b); err != nil {
 		t.Fatalf("Failed to generate random bytes: %v", err)
 	}
@@ -513,23 +527,52 @@ func TestDecryptIPPfxAcceptsFourByteEncryptedIPv4(t *testing.T) {
 		t.Fatalf("Failed to decode key: %v", err)
 	}
 
-	ip := net.ParseIP("192.0.2.1")
-	if ip == nil {
-		t.Fatal("Failed to parse IP")
-	}
+	ip := mustParseIPPreserveWidth(t, "192.0.2.1")
 
 	encrypted, err := EncryptIPPfx(ip, key)
 	if err != nil {
 		t.Fatalf("EncryptIPPfx failed: %v", err)
 	}
 
+	if len(encrypted) != net.IPv4len {
+		t.Fatalf("Expected encrypted IP to be %d bytes not %d bytes for a %d-byte input IP", net.IPv4len, len(encrypted), net.IPv4len)
+	}
+
 	decrypted, err := DecryptIPPfx(encrypted.To4(), key)
 	if err != nil {
-		t.Fatalf("DecryptIPPfx failed for 4-byte encrypted IPv4: %v", err)
+		t.Fatalf("DecryptIPPfx failed for %d-byte encrypted IPv4: %v", net.IPv4len, err)
+	}
+
+	if len(decrypted) != net.IPv4len {
+		t.Fatalf("Expected decrypted IP to be %d bytes not %d bytes for a %d-byte input IP", net.IPv4len, len(decrypted), net.IPv4len)
 	}
 
 	if !decrypted.Equal(ip) {
 		t.Fatalf("Decryption failed: got %s, want %s", decrypted, ip)
+	}
+}
+
+func TestEncryptIPToRejectsNonExactBufferLength(t *testing.T) {
+	key, _ := hex.DecodeString("1032547698badcfeefcdab8967452301")
+	scratch := NewScratchPad()
+
+	if _, err := EncryptIPTo(key, net.ParseIP("192.0.2.1"), make([]byte, net.IPv6len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+	if _, err := EncryptIPTo(key, net.ParseIP("192.0.2.1"), make([]byte, net.IPv6len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected oversized-buffer error, got %v", err)
+	}
+}
+
+func TestDecryptIPToRejectsNonExactBufferLength(t *testing.T) {
+	key, _ := hex.DecodeString("1032547698badcfeefcdab8967452301")
+	scratch := NewScratchPad()
+
+	if _, err := DecryptIPTo(key, net.ParseIP("30.93.34.67"), make([]byte, net.IPv6len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+	if _, err := DecryptIPTo(key, net.ParseIP("30.93.34.67"), make([]byte, net.IPv6len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected oversized-buffer error, got %v", err)
 	}
 }
 
@@ -555,6 +598,9 @@ func TestEncryptIPNonDeterministicTo(t *testing.T) {
 	if _, err := EncryptIPNonDeterministicTo(net.ParseIP("192.0.2.1"), key, tweak, make([]byte, NonDeterministicSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
 		t.Fatalf("expected short-buffer error, got %v", err)
 	}
+	if _, err := EncryptIPNonDeterministicTo(net.ParseIP("192.0.2.1"), key, tweak, make([]byte, NonDeterministicSize+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected oversized-buffer error, got %v", err)
+	}
 }
 
 func TestDecryptIPNonDeterministicTo(t *testing.T) {
@@ -562,7 +608,7 @@ func TestDecryptIPNonDeterministicTo(t *testing.T) {
 	ciphertext, _ := hex.DecodeString("21bd1834bc088cd2e5e1fe55f95876e639faae2594a0caad")
 	scratch := NewScratchPad()
 
-	buf := make([]byte, MaxIPSize)
+	buf := make([]byte, net.IPv6len)
 	decrypted, err := DecryptIPNonDeterministicTo(ciphertext, key, buf, scratch)
 	if err != nil {
 		t.Fatalf("DecryptIPNonDeterministicTo failed: %v", err)
@@ -576,8 +622,11 @@ func TestDecryptIPNonDeterministicTo(t *testing.T) {
 		t.Fatalf("DecryptIPNonDeterministicTo mismatch: got %s", decrypted)
 	}
 
-	if _, err := DecryptIPNonDeterministicTo(ciphertext, key, make([]byte, MaxIPSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+	if _, err := DecryptIPNonDeterministicTo(ciphertext, key, make([]byte, net.IPv6len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
 		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+	if _, err := DecryptIPNonDeterministicTo(ciphertext, key, make([]byte, net.IPv6len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected oversized-buffer error, got %v", err)
 	}
 }
 
@@ -585,19 +634,22 @@ func TestEncryptIPPfxTo(t *testing.T) {
 	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
 	scratch := NewScratchPad()
 
-	ipv4Buf := make([]byte, MaxIPSize)
-	encryptedIPv4, err := EncryptIPPfxTo(net.ParseIP("192.0.2.1"), key, ipv4Buf, scratch)
+	ipv4Buf := make([]byte, net.IPv4len)
+	encryptedIPv4, err := EncryptIPPfxTo(mustParseIPPreserveWidth(t, "192.0.2.1"), key, ipv4Buf, scratch)
 	if err != nil {
 		t.Fatalf("EncryptIPPfxTo IPv4 failed: %v", err)
 	}
 	if &encryptedIPv4[0] != &ipv4Buf[0] {
 		t.Fatal("EncryptIPPfxTo IPv4 did not reuse caller buffer")
 	}
+	if len(encryptedIPv4) != net.IPv4len {
+		t.Fatalf("EncryptIPPfxTo IPv4 returned %d bytes, want %d", len(encryptedIPv4), net.IPv4len)
+	}
 	if got := encryptedIPv4.String(); got != "100.115.72.131" {
 		t.Fatalf("EncryptIPPfxTo IPv4 mismatch: got %s", got)
 	}
 
-	ipv6Buf := make([]byte, MaxIPSize)
+	ipv6Buf := make([]byte, net.IPv6len)
 	encryptedIPv6, err := EncryptIPPfxTo(net.ParseIP("2001:db8::1"), key, ipv6Buf, scratch)
 	if err != nil {
 		t.Fatalf("EncryptIPPfxTo IPv6 failed: %v", err)
@@ -609,11 +661,17 @@ func TestEncryptIPPfxTo(t *testing.T) {
 		t.Fatalf("EncryptIPPfxTo IPv6 mismatch: got %s", got)
 	}
 
-	if _, err := EncryptIPPfxTo(net.ParseIP("192.0.2.1"), key, make([]byte, MaxIPSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+	if _, err := EncryptIPPfxTo(mustParseIPPreserveWidth(t, "192.0.2.1"), key, make([]byte, net.IPv4len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
 		t.Fatalf("expected short IPv4 buffer error, got %v", err)
 	}
-	if _, err := EncryptIPPfxTo(net.ParseIP("2001:db8::1"), key, make([]byte, MaxIPSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+	if _, err := EncryptIPPfxTo(mustParseIPPreserveWidth(t, "192.0.2.1"), key, make([]byte, net.IPv4len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected oversized IPv4 buffer error, got %v", err)
+	}
+	if _, err := EncryptIPPfxTo(net.ParseIP("2001:db8::1"), key, make([]byte, net.IPv6len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
 		t.Fatalf("expected short IPv6 buffer error, got %v", err)
+	}
+	if _, err := EncryptIPPfxTo(net.ParseIP("2001:db8::1"), key, make([]byte, net.IPv6len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected oversized IPv6 buffer error, got %v", err)
 	}
 }
 
@@ -621,19 +679,22 @@ func TestDecryptIPPfxTo(t *testing.T) {
 	key, _ := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
 	scratch := NewScratchPad()
 
-	ipv4Buf := make([]byte, MaxIPSize)
-	decryptedIPv4, err := DecryptIPPfxTo(net.ParseIP("100.115.72.131").To4(), key, ipv4Buf, scratch)
+	ipv4Buf := make([]byte, net.IPv4len)
+	decryptedIPv4, err := DecryptIPPfxTo(mustParseIPPreserveWidth(t, "100.115.72.131"), key, ipv4Buf, scratch)
 	if err != nil {
 		t.Fatalf("DecryptIPPfxTo IPv4 failed: %v", err)
 	}
 	if &decryptedIPv4[0] != &ipv4Buf[0] {
 		t.Fatal("DecryptIPPfxTo IPv4 did not reuse caller buffer")
 	}
+	if len(decryptedIPv4) != net.IPv4len {
+		t.Fatalf("DecryptIPPfxTo IPv4 returned %d bytes, want %d", len(decryptedIPv4), net.IPv4len)
+	}
 	if got := decryptedIPv4.String(); got != "192.0.2.1" {
 		t.Fatalf("DecryptIPPfxTo IPv4 mismatch: got %s", got)
 	}
 
-	ipv6Buf := make([]byte, MaxIPSize)
+	ipv6Buf := make([]byte, net.IPv6len)
 	decryptedIPv6, err := DecryptIPPfxTo(net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"), key, ipv6Buf, scratch)
 	if err != nil {
 		t.Fatalf("DecryptIPPfxTo IPv6 failed: %v", err)
@@ -645,11 +706,17 @@ func TestDecryptIPPfxTo(t *testing.T) {
 		t.Fatalf("DecryptIPPfxTo IPv6 mismatch: got %s", got)
 	}
 
-	if _, err := DecryptIPPfxTo(net.ParseIP("100.115.72.131").To4(), key, make([]byte, MaxIPSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+	if _, err := DecryptIPPfxTo(mustParseIPPreserveWidth(t, "100.115.72.131"), key, make([]byte, net.IPv4len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
 		t.Fatalf("expected short IPv4 buffer error, got %v", err)
 	}
-	if _, err := DecryptIPPfxTo(net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"), key, make([]byte, MaxIPSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+	if _, err := DecryptIPPfxTo(mustParseIPPreserveWidth(t, "100.115.72.131"), key, make([]byte, net.IPv4len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected oversized IPv4 buffer error, got %v", err)
+	}
+	if _, err := DecryptIPPfxTo(net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"), key, make([]byte, net.IPv6len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
 		t.Fatalf("expected short IPv6 buffer error, got %v", err)
+	}
+	if _, err := DecryptIPPfxTo(net.ParseIP("c180:5dd4:2587:3524:30ab:fa65:6ab6:f88"), key, make([]byte, net.IPv6len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected oversized IPv6 buffer error, got %v", err)
 	}
 }
 
@@ -668,8 +735,12 @@ func TestIPPfxScratchPadReuseAcrossCalls(t *testing.T) {
 	}
 
 	for _, tc := range encryptCases {
-		buf := make([]byte, MaxIPSize)
-		encrypted, err := EncryptIPPfxTo(net.ParseIP(tc.ip), key, buf, scratch)
+		bufSize := net.IPv6len
+		if netip.MustParseAddr(tc.ip).Is4() {
+			bufSize = net.IPv4len
+		}
+		buf := make([]byte, bufSize)
+		encrypted, err := EncryptIPPfxTo(mustParseIPPreserveWidth(t, tc.ip), key, buf, scratch)
 		if err != nil {
 			t.Fatalf("EncryptIPPfxTo(%s) failed: %v", tc.ip, err)
 		}
@@ -691,8 +762,12 @@ func TestIPPfxScratchPadReuseAcrossCalls(t *testing.T) {
 	}
 
 	for _, tc := range decryptCases {
-		buf := make([]byte, MaxIPSize)
-		decrypted, err := DecryptIPPfxTo(net.ParseIP(tc.ciphertext), key, buf, scratch)
+		bufSize := net.IPv6len
+		if netip.MustParseAddr(tc.ciphertext).Is4() {
+			bufSize = net.IPv4len
+		}
+		buf := make([]byte, bufSize)
+		decrypted, err := DecryptIPPfxTo(mustParseIPPreserveWidth(t, tc.ciphertext), key, buf, scratch)
 		if err != nil {
 			t.Fatalf("DecryptIPPfxTo(%s) failed: %v", tc.ciphertext, err)
 		}
@@ -727,6 +802,9 @@ func TestEncryptIPNonDeterministicXTo(t *testing.T) {
 	if _, err := EncryptIPNonDeterministicXTo(net.ParseIP("192.0.2.1"), key, tweak, make([]byte, NonDeterministicXSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
 		t.Fatalf("expected short-buffer error, got %v", err)
 	}
+	if _, err := EncryptIPNonDeterministicXTo(net.ParseIP("192.0.2.1"), key, tweak, make([]byte, NonDeterministicXSize+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid encrypted parameter") {
+		t.Fatalf("expected oversized-buffer error, got %v", err)
+	}
 }
 
 func TestDecryptIPNonDeterministicXTo(t *testing.T) {
@@ -734,7 +812,7 @@ func TestDecryptIPNonDeterministicXTo(t *testing.T) {
 	ciphertext, _ := hex.DecodeString("08e0c289bff23b7cb4ecbe30b70898d7766a533392a69edf1ad0d3ce362ba98a")
 	scratch := NewScratchPad()
 
-	buf := make([]byte, MaxIPSize)
+	buf := make([]byte, net.IPv6len)
 	decrypted, err := DecryptIPNonDeterministicXTo(ciphertext, key, buf, scratch)
 	if err != nil {
 		t.Fatalf("DecryptIPNonDeterministicXTo failed: %v", err)
@@ -748,8 +826,11 @@ func TestDecryptIPNonDeterministicXTo(t *testing.T) {
 		t.Fatalf("DecryptIPNonDeterministicXTo mismatch: got %s", decrypted)
 	}
 
-	if _, err := DecryptIPNonDeterministicXTo(ciphertext, key, make([]byte, MaxIPSize-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+	if _, err := DecryptIPNonDeterministicXTo(ciphertext, key, make([]byte, net.IPv6len-1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
 		t.Fatalf("expected short-buffer error, got %v", err)
+	}
+	if _, err := DecryptIPNonDeterministicXTo(ciphertext, key, make([]byte, net.IPv6len+1), scratch); err == nil || !strings.Contains(err.Error(), "invalid decrypted parameter") {
+		t.Fatalf("expected oversized-buffer error, got %v", err)
 	}
 }
 
@@ -810,7 +891,7 @@ func TestIPNonDeterministicXScratchPadReuseAcrossCalls(t *testing.T) {
 	}
 
 	for _, tc := range decryptCases {
-		buf := make([]byte, MaxIPSize)
+		buf := make([]byte, net.IPv6len)
 		decrypted, err := DecryptIPNonDeterministicXTo(tc.ciphertext, tc.key, buf, scratch)
 		if err != nil {
 			t.Fatalf("DecryptIPNonDeterministicXTo failed: %v", err)
@@ -891,7 +972,7 @@ func BenchmarkAllocations(b *testing.B) {
 	b.Run("DeterministicEncryptTo", func(b *testing.B) {
 		for _, tc := range deterministicCases {
 			b.Run(tc.name, func(b *testing.B) {
-				buf := make([]byte, MaxIPSize)
+				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				if _, err := EncryptIPTo(tc.key, tc.ip, buf, scratch); err != nil {
 					b.Fatal(err)
@@ -926,7 +1007,7 @@ func BenchmarkAllocations(b *testing.B) {
 	b.Run("DeterministicDecryptTo", func(b *testing.B) {
 		for _, tc := range deterministicCases {
 			b.Run(tc.name, func(b *testing.B) {
-				buf := make([]byte, MaxIPSize)
+				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				if _, err := DecryptIPTo(tc.key, tc.cipherIP, buf, scratch); err != nil {
 					b.Fatal(err)
@@ -993,7 +1074,7 @@ func BenchmarkAllocations(b *testing.B) {
 	b.Run("NDDecryptTo", func(b *testing.B) {
 		for _, tc := range ndCases {
 			b.Run(tc.name, func(b *testing.B) {
-				buf := make([]byte, MaxIPSize)
+				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
 				for b.Loop() {
@@ -1057,7 +1138,7 @@ func BenchmarkAllocations(b *testing.B) {
 	b.Run("NDXDecryptTo", func(b *testing.B) {
 		for _, tc := range ndxCases {
 			b.Run(tc.name, func(b *testing.B) {
-				buf := make([]byte, MaxIPSize)
+				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
 				for b.Loop() {
@@ -1089,7 +1170,7 @@ func BenchmarkAllocations(b *testing.B) {
 	b.Run("PFXEncryptTo", func(b *testing.B) {
 		for _, tc := range pfxCases {
 			b.Run(tc.name, func(b *testing.B) {
-				buf := make([]byte, MaxIPSize)
+				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
 				for b.Loop() {
@@ -1121,7 +1202,7 @@ func BenchmarkAllocations(b *testing.B) {
 	b.Run("PFXDecryptTo", func(b *testing.B) {
 		for _, tc := range pfxCases {
 			b.Run(tc.name, func(b *testing.B) {
-				buf := make([]byte, MaxIPSize)
+				buf := make([]byte, net.IPv6len)
 				scratch := NewScratchPad()
 				b.ReportAllocs()
 				for b.Loop() {
@@ -1191,10 +1272,7 @@ func benchmarkCasesFromTestVectors(b *testing.B, variant string) []benchmarkVect
 
 		switch variant {
 		case "ipcrypt-deterministic", "ipcrypt-pfx":
-			tc.cipherIP = net.ParseIP(tv.output)
-			if tc.cipherIP == nil {
-				b.Fatalf("invalid benchmark ciphertext IP in test vector: %s", tv.output)
-			}
+			tc.cipherIP = mustParseIPPreserveWidth(b, tv.output)
 		case "ipcrypt-nd", "ipcrypt-ndx":
 			tc.ciphertext, err = hex.DecodeString(tv.output)
 			if err != nil {
