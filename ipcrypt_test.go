@@ -552,6 +552,23 @@ func TestDecryptIPPfxAcceptsFourByteEncryptedIPv4(t *testing.T) {
 	}
 }
 
+func TestIPPfxRejectsInvalidIPParameterLength(t *testing.T) {
+	key, err := hex.DecodeString("0123456789abcdeffedcba98765432101032547698badcfeefcdab8967452301")
+	if err != nil {
+		t.Fatalf("Failed to decode key: %v", err)
+	}
+
+	invalidIP := net.IP{1, 2, 3, 4, 5}
+
+	if _, err := EncryptIPPfx(invalidIP, key); err == nil || !strings.Contains(err.Error(), "invalid ip parameter length") {
+		t.Fatalf("expected invalid ip length error from EncryptIPPfx, got %v", err)
+	}
+
+	if _, err := DecryptIPPfx(invalidIP, key); err == nil || !strings.Contains(err.Error(), "invalid encryptedIP parameter length") {
+		t.Fatalf("expected invalid encryptedIP length error from DecryptIPPfx, got %v", err)
+	}
+}
+
 func TestEncryptIPToRejectsNonExactBufferLength(t *testing.T) {
 	key, _ := hex.DecodeString("1032547698badcfeefcdab8967452301")
 	scratch := NewScratchPad()
