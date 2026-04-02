@@ -88,6 +88,7 @@ func main() {
 - `KeySizeDeterministic`: 16 bytes (ipcrypt-deterministic)
 - `KeySizeND`: 16 bytes (ipcrypt-nd)
 - `KeySizeNDX`: 32 bytes (ipcrypt-ndx)
+- `KeySizePFX`: 32 bytes (ipcrypt-pfx, split into two AES-128 keys)
 - `TweakSize`: 8 bytes (ipcrypt-nd tweak)
 - `TweakSizeX`: 16 bytes (ipcrypt-ndx tweak)
 - `NonDeterministicSize`: 24 bytes (`TweakSize + net.IPv6len`)
@@ -107,6 +108,8 @@ func main() {
 - `DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation deterministic decryption into a preallocated buffer of exactly `net.IPv6len` bytes
 
 #### Prefix-Preserving Mode (ipcrypt-pfx)
+All `ipcrypt-pfx` functions require a key of exactly `KeySizePFX` bytes, split into two distinct AES-128 keys.
+
 - `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` - Encrypts an IP address with prefix preservation
 - `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` - Decrypts an IP address with prefix preservation
 - `EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad) (net.IP, error)` - Zero-allocation prefix-preserving encryption into a preallocated buffer of exactly `net.IPv4len` bytes for IPv4 or exactly `net.IPv6len` bytes for IPv6

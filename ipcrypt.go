@@ -23,6 +23,7 @@ const (
 	KeySizeDeterministic = 16 // Size in bytes of the key for ipcrypt-deterministic mode
 	KeySizeND            = 16 // Size in bytes of the key for ipcrypt-nd mode
 	KeySizeNDX           = 32 // Size in bytes of the key for ipcrypt-ndx mode
+	KeySizePFX           = 32 // Size in bytes of the key for ipcrypt-pfx mode
 )
 
 // Tweak sizes for different encryption modes
@@ -399,7 +400,7 @@ func DecryptIPNonDeterministic(ciphertext []byte, key []byte) (string, error) {
 // Prefix-preserving mode functions
 
 // EncryptIPPfxTo encrypts an IP address using ipcrypt-pfx mode.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
+// The key must be exactly KeySizePFX bytes long (split into two AES-128 keys).
 // The encrypted parameter must be exactly net.IPv4len bytes for IPv4 inputs or exactly
 // net.IPv6len bytes for IPv6 inputs.
 // The scratch parameter provides reusable state to avoid allocations across calls.
@@ -410,13 +411,13 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 		return nil, errors.New("scratch parameter must not be nil")
 	}
 
-	if len(key) != 32 {
-		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
+	if err := validateKey(key, KeySizePFX); err != nil {
+		return nil, err
 	}
 
 	// Split the key into two AES-128 keys
-	k1 := key[:16]
-	k2 := key[16:32]
+	k1 := key[:aes.BlockSize]
+	k2 := key[aes.BlockSize:KeySizePFX]
 
 	// Check that K1 and K2 are different
 	if subtle.ConstantTimeCompare(k1, k2) == 1 {
@@ -508,11 +509,11 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 }
 
 // EncryptIPPfx encrypts an IP address using ipcrypt-pfx mode.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
+// The key must be exactly KeySizePFX bytes long (split into two AES-128 keys).
 // Returns the encrypted IP address maintaining the original format (IPv4 or IPv6).
 func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
-	if len(key) != 32 {
-		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
+	if err := validateKey(key, KeySizePFX); err != nil {
+		return nil, err
 	}
 	var encrypted []byte
 	switch len(ip) {
@@ -528,7 +529,7 @@ func EncryptIPPfx(ip net.IP, key []byte) (net.IP, error) {
 }
 
 // DecryptIPPfxTo decrypts an IP address that was encrypted using ipcrypt-pfx mode.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
+// The key must be exactly KeySizePFX bytes long (split into two AES-128 keys).
 // The decrypted parameter must be exactly net.IPv4len bytes for IPv4 inputs or exactly
 // net.IPv6len bytes for IPv6 inputs.
 // The scratch parameter provides reusable state to avoid allocations across calls.
@@ -539,13 +540,13 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 		return nil, errors.New("scratch parameter must not be nil")
 	}
 
-	if len(key) != 32 {
-		return nil, fmt.Errorf("%w: got %d bytes, want 32 bytes", ErrInvalidKeySize, len(key))
+	if err := validateKey(key, KeySizePFX); err != nil {
+		return nil, err
 	}
 
 	// Split the key into two AES-128 keys
-	k1 := key[:16]
-	k2 := key[16:32]
+	k1 := key[:aes.BlockSize]
+	k2 := key[aes.BlockSize:KeySizePFX]
 
 	// Check that K1 and K2 are different
 	if subtle.ConstantTimeCompare(k1, k2) == 1 {
@@ -640,7 +641,7 @@ func DecryptIPPfxTo(encryptedIP net.IP, key []byte, decrypted []byte, scratch *S
 }
 
 // DecryptIPPfx decrypts an IP address that was encrypted using ipcrypt-pfx mode.
-// The key must be exactly 32 bytes long (split into two AES-128 keys).
+// The key must be exactly KeySizePFX bytes long (split into two AES-128 keys).
 // Returns the decrypted IP address.
 func DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error) {
 	var decrypted []byte
