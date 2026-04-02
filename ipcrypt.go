@@ -221,10 +221,10 @@ func EncryptIPTo(key []byte, ip net.IP, encrypted []byte, scratch *ScratchPad) (
 
 	ipBytes := []byte(ip)
 	if len(ip) != net.IPv6len {
-		if err := validateIPTo(ip, scratch.scratch1[:MaxIPSize]); err != nil {
+		if err := validateIPTo(ip, encrypted[:MaxIPSize]); err != nil {
 			return nil, err
 		}
-		ipBytes = scratch.scratch1[:MaxIPSize]
+		ipBytes = encrypted[:MaxIPSize]
 	}
 
 	block, err := scratch.getAESBlock(1, key)
@@ -266,10 +266,10 @@ func DecryptIPTo(key []byte, encrypted net.IP, decrypted []byte, scratch *Scratc
 
 	ipBytes := []byte(encrypted)
 	if len(encrypted) != net.IPv6len {
-		if err := validateIPTo(encrypted, scratch.scratch1[:MaxIPSize]); err != nil {
+		if err := validateIPTo(encrypted, decrypted[:MaxIPSize]); err != nil {
 			return nil, err
 		}
-		ipBytes = scratch.scratch1[:MaxIPSize]
+		ipBytes = decrypted[:MaxIPSize]
 	}
 
 	block, err := scratch.getAESBlock(1, key)
@@ -447,7 +447,7 @@ func EncryptIPPfxTo(ip net.IP, key []byte, encrypted []byte, scratch *ScratchPad
 	if err := validateOutputLength(encrypted, MaxIPSize, "encrypted"); err != nil {
 		return nil, err
 	}
-	
+
 	// Determine starting point
 	prefixStart := 0
 	if isIPv4 {
