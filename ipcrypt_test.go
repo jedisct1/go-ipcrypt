@@ -149,11 +149,7 @@ func TestReferenceVectors(t *testing.T) {
 			// Test encryption
 			switch tv.variant {
 			case "ipcrypt-deterministic":
-				encryptedIP, err := EncryptIP(key, ip)
-				if err != nil {
-					t.Fatalf("Encryption failed: %v", err)
-				}
-				encrypted = encryptedIP
+				encrypted, err = EncryptIP(key, ip)
 			case "ipcrypt-nd":
 				tweak, err = hex.DecodeString(tv.tweak)
 				if err != nil {
@@ -167,11 +163,7 @@ func TestReferenceVectors(t *testing.T) {
 				}
 				encrypted, err = EncryptIPNonDeterministicX(ip.String(), key, tweak)
 			case "ipcrypt-pfx":
-				encryptedIP, err := EncryptIPPfx(ip, key)
-				if err != nil {
-					t.Fatalf("Encryption failed: %v", err)
-				}
-				encrypted = encryptedIP
+				encrypted, err = EncryptIPPfx(ip, key)
 			}
 			if err != nil {
 				t.Fatalf("Encryption failed: %v", err)
@@ -191,17 +183,18 @@ func TestReferenceVectors(t *testing.T) {
 
 			// Test decryption
 			var decrypted net.IP
+			var decryptedStr string
 			switch tv.variant {
 			case "ipcrypt-deterministic":
 				decrypted, err = DecryptIP(key, net.IP(encrypted))
 			case "ipcrypt-nd":
-				decryptedStr, err := DecryptIPNonDeterministic(encrypted, key)
+				decryptedStr, err = DecryptIPNonDeterministic(encrypted, key)
 				if err != nil {
 					t.Fatalf("Decryption failed: %v", err)
 				}
 				decrypted = net.ParseIP(decryptedStr)
 			case "ipcrypt-ndx":
-				decryptedStr, err := DecryptIPNonDeterministicX(encrypted, key)
+				decryptedStr, err = DecryptIPNonDeterministicX(encrypted, key)
 				if err != nil {
 					t.Fatalf("Decryption failed: %v", err)
 				}
@@ -313,11 +306,6 @@ func TestIPNonDeterministic(t *testing.T) {
 		if err != nil {
 			t.Errorf("Test %d: Failed to decode key: %v", i, err)
 			continue
-		}
-
-		// Use only first 16 bytes of the key
-		if len(key) > KeySizeND {
-			key = key[:KeySizeND]
 		}
 
 		tweak, err := hex.DecodeString(test.tweak)

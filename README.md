@@ -77,15 +77,15 @@ func main() {
     fmt.Printf("Non-deterministic decrypted: %s\n", decryptedND)
 
     // ipcrypt-ndx mode with random tweak
-    xtsKey := make([]byte, ipcrypt.KeySizeNDX)
-    rand.Read(xtsKey)
+    ndxKey := make([]byte, ipcrypt.KeySizeNDX)
+    rand.Read(ndxKey)
 
-    encryptedX, err := ipcrypt.EncryptIPNonDeterministicX(ip.String(), xtsKey, nil)
+    encryptedX, err := ipcrypt.EncryptIPNonDeterministicX(ip.String(), ndxKey, nil)
     if err != nil {
         panic(err)
     }
 
-    decryptedX, err := ipcrypt.DecryptIPNonDeterministicX(encryptedX, xtsKey)
+    decryptedX, err := ipcrypt.DecryptIPNonDeterministicX(encryptedX, ndxKey)
     if err != nil {
         panic(err)
     }
@@ -180,6 +180,7 @@ The original functions (without `To`) call the `*To` variant with a nil `dst`.
 - `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` — Decrypts with prefix preservation
 
 The PFX key must be exactly 32 bytes (split into two AES-128 keys internally).
+The two 16-byte halves of the key must differ; passing identical halves returns an error.
 For IPv4, `dst` must still be ≥ 16 bytes; the returned `net.IP` is `dst[12:16]`.
 
 #### KIASU-BC (low-level)
