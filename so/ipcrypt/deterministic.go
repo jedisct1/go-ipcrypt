@@ -28,12 +28,12 @@ func (c *DeterministicCipher) EncryptIP(ip netip.Addr) (netip.Addr, error) {
 	if !c.ready {
 		return netip.Addr{}, ErrUninitialized
 	}
-	var in [16]byte
-	if err := addrTo16(in[:], ip); err != nil {
+	var in block
+	if err := addrTo16(&in, ip); err != nil {
 		return netip.Addr{}, err
 	}
-	var out [16]byte
-	encryptBlock(out[:], &c.rk, in[:])
+	var out block
+	encryptBlock(&out, &c.rk, &in)
 	return netip.AddrFrom16(out), nil
 }
 
@@ -44,12 +44,12 @@ func (c *DeterministicCipher) DecryptIP(encrypted netip.Addr) (netip.Addr, error
 	if !c.ready {
 		return netip.Addr{}, ErrUninitialized
 	}
-	var in [16]byte
-	if err := addrTo16(in[:], encrypted); err != nil {
+	var in block
+	if err := addrTo16(&in, encrypted); err != nil {
 		return netip.Addr{}, err
 	}
-	var out [16]byte
-	decryptBlock(out[:], &c.rk, in[:])
+	var out block
+	decryptBlock(&out, &c.rk, &in)
 	return netip.AddrFrom16(out), nil
 }
 

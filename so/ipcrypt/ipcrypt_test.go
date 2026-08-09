@@ -7,7 +7,6 @@
 package ipcrypt
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/rand"
 	"encoding/hex"
@@ -28,15 +27,13 @@ func mustDecode(t *testing.T, s string) []byte {
 // TestAESMatchesStdlib checks the portable AES-128 core against crypto/aes.
 func TestAESMatchesStdlib(t *testing.T) {
 	key := make([]byte, 16)
-	src := make([]byte, 16)
-	got := make([]byte, 16)
-	want := make([]byte, 16)
+	var src, got, want block
 
 	for i := 0; i < 1000; i++ {
 		rand.Read(key)
-		rand.Read(src)
+		rand.Read(src[:])
 
-		block, err := aes.NewCipher(key)
+		ref, err := aes.NewCipher(key)
 		if err != nil {
 			t.Fatalf("aes.NewCipher: %v", err)
 		}
@@ -44,15 +41,15 @@ func TestAESMatchesStdlib(t *testing.T) {
 		var rk roundKeys
 		expandKey(&rk, key)
 
-		block.Encrypt(want, src)
-		encryptBlock(got, &rk, src)
-		if !bytes.Equal(got, want) {
+		ref.Encrypt(want[:], src[:])
+		encryptBlock(&got, &rk, &src)
+		if got != want {
 			t.Fatalf("encryptBlock(%x, %x) = %x, want %x", key, src, got, want)
 		}
 
-		block.Decrypt(want, src)
-		decryptBlock(got, &rk, src)
-		if !bytes.Equal(got, want) {
+		ref.Decrypt(want[:], src[:])
+		decryptBlock(&got, &rk, &src)
+		if got != want {
 			t.Fatalf("decryptBlock(%x, %x) = %x, want %x", key, src, got, want)
 		}
 	}
@@ -62,30 +59,28 @@ func TestAESMatchesStdlib(t *testing.T) {
 // all-zero tweak it degenerates to plain AES-128.
 func TestKiasuZeroTweakIsAES(t *testing.T) {
 	key := make([]byte, 16)
-	src := make([]byte, 16)
 	tweak := make([]byte, TweakSize)
-	got := make([]byte, 16)
-	want := make([]byte, 16)
+	var src, got, want block
 
 	for i := 0; i < 100; i++ {
 		rand.Read(key)
-		rand.Read(src)
+		rand.Read(src[:])
 
-		block, err := aes.NewCipher(key)
+		ref, err := aes.NewCipher(key)
 		if err != nil {
 			t.Fatalf("aes.NewCipher: %v", err)
 		}
-		block.Encrypt(want, src)
+		ref.Encrypt(want[:], src[:])
 
 		var rk roundKeys
 		expandKey(&rk, key)
-		kiasuEncrypt(got, &rk, tweak, src)
-		if !bytes.Equal(got, want) {
+		kiasuEncrypt(&got, &rk, tweak, &src)
+		if got != want {
 			t.Fatalf("kiasuEncrypt with a zero tweak = %x, want %x", got, want)
 		}
 
-		kiasuDecrypt(got, &rk, tweak, want)
-		if !bytes.Equal(got, src) {
+		kiasuDecrypt(&got, &rk, tweak, &want)
+		if got != src {
 			t.Fatalf("kiasuDecrypt with a zero tweak = %x, want %x", got, src)
 		}
 	}

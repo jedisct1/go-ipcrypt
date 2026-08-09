@@ -47,14 +47,13 @@ func (c *PfxCipher) transform(ip netip.Addr, decrypt bool) (netip.Addr, error) {
 	if !c.ready {
 		return netip.Addr{}, ErrUninitialized
 	}
-	var in [16]byte
-	if err := addrTo16(in[:], ip); err != nil {
+	var in block
+	if err := addrTo16(&in, ip); err != nil {
 		return netip.Addr{}, err
 	}
 	isIPv4 := ip.Is4() || ip.Is4In6()
 
-	var out [16]byte
-	var paddedPrefix [16]byte
+	var out, paddedPrefix block
 	prefixStart := 0
 	if isIPv4 {
 		prefixStart = 96
@@ -65,24 +64,24 @@ func (c *PfxCipher) transform(ip netip.Addr, decrypt bool) (netip.Addr, error) {
 		paddedPrefix[15] = 0x01
 	}
 
-	var e1, e2 [16]byte
+	var e1, e2 block
 	for prefixLenBits := prefixStart; prefixLenBits < 128; prefixLenBits++ {
-		encryptBlock(e1[:], &c.rk1, paddedPrefix[:])
-		encryptBlock(e2[:], &c.rk2, paddedPrefix[:])
+		encryptBlock(&e1, &c.rk1, &paddedPrefix)
+		encryptBlock(&e2, &c.rk2, &paddedPrefix)
 		// Only the last bit of the XOR of the two ciphertexts is used.
 		cipherBit := (e1[15] ^ e2[15]) & 1
 
 		currentBitPos := 127 - prefixLenBits
-		inputBit := getBit(in[:], currentBitPos)
+		inputBit := getBit(&in, currentBitPos)
 		outputBit := cipherBit ^ inputBit
-		setBit(out[:], currentBitPos, outputBit)
+		setBit(&out, currentBitPos, outputBit)
 
 		plainBit := inputBit
 		if decrypt {
 			plainBit = outputBit
 		}
-		shiftLeftOneBit(paddedPrefix[:])
-		setBit(paddedPrefix[:], 0, plainBit)
+		shiftLeftOneBit(&paddedPrefix)
+		setBit(&paddedPrefix, 0, plainBit)
 	}
 
 	if isIPv4 {
@@ -114,14 +113,14 @@ func DecryptIPPfx(key []byte, encrypted netip.Addr) (netip.Addr, error) {
 // getBit reads the bit at position in a 16-byte big-endian value.
 // Position 0 is the least significant bit of the last byte, 127 the most
 // significant bit of the first.
-func getBit(data []byte, position int) byte {
+func getBit(data *block, position int) byte {
 	byteIndex := 15 - (position / 8)
 	bitIndex := position % 8
 	return (data[byteIndex] >> bitIndex) & 1
 }
 
 // setBit writes the bit at position in a 16-byte big-endian value.
-func setBit(data []byte, position int, value byte) {
+func setBit(data *block, position int, value byte) {
 	byteIndex := 15 - (position / 8)
 	bitIndex := position % 8
 	if value != 0 {
@@ -131,9 +130,9 @@ func setBit(data []byte, position int, value byte) {
 	}
 }
 
-// shiftLeftOneBit shifts a 16-byte value one bit to the left, in place.
+// shiftLeftOneBit shifts a block one bit to the left, in place.
 // The most significant bit is dropped and a zero comes in from the right.
-func shiftLeftOneBit(data []byte) {
+func shiftLeftOneBit(data *block) {
 	carry := byte(0)
 	for i := 15; i >= 0; i-- {
 		newCarry := (data[i] >> 7) & 1

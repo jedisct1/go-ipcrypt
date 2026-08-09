@@ -198,9 +198,14 @@ func invMixColumns(state *block) {
 	}
 }
 
-// encryptBlock encrypts one 16-byte block with AES-128.
-// dst and src must each hold at least 16 bytes and may be the same slice.
-func encryptBlock(dst []byte, rk *roundKeys, src []byte) {
+// encryptBlock encrypts one block with AES-128.
+// dst and src may be the same block.
+func encryptBlock(dst *block, rk *roundKeys, src *block) {
+	if hardwareAES() {
+		hardwareEncryptBlock(dst[:], rk[0][:], src[:])
+		return
+	}
+
 	var state block
 	for i := 0; i < 16; i++ {
 		state[i] = src[i] ^ rk[0][i]
@@ -226,9 +231,14 @@ func encryptBlock(dst []byte, rk *roundKeys, src []byte) {
 	}
 }
 
-// decryptBlock decrypts one 16-byte block with AES-128.
-// dst and src must each hold at least 16 bytes and may be the same slice.
-func decryptBlock(dst []byte, rk *roundKeys, src []byte) {
+// decryptBlock decrypts one block with AES-128.
+// dst and src may be the same block.
+func decryptBlock(dst *block, rk *roundKeys, src *block) {
+	if hardwareAES() {
+		hardwareDecryptBlock(dst[:], rk[0][:], src[:])
+		return
+	}
+
 	var state block
 	for i := 0; i < 16; i++ {
 		state[i] = src[i] ^ rk[10][i]

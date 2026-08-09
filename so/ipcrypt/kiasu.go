@@ -11,9 +11,7 @@ func padTweak(dst *block, tweak []byte) {
 
 // tweakSchedule adds the padded tweak to every round key.
 // That is all KIASU-BC is: AES-128 whose round keys carry the tweak.
-func tweakSchedule(dst, rk *roundKeys, tweak []byte) {
-	var padded block
-	padTweak(&padded, tweak)
+func tweakSchedule(dst, rk *roundKeys, padded *block) {
 	for round := 0; round < 11; round++ {
 		for i := 0; i < 16; i++ {
 			dst[round][i] = rk[round][i] ^ padded[i]
@@ -21,15 +19,29 @@ func tweakSchedule(dst, rk *roundKeys, tweak []byte) {
 	}
 }
 
-func kiasuEncrypt(dst []byte, rk *roundKeys, tweak, src []byte) {
+func kiasuEncrypt(dst *block, rk *roundKeys, tweak []byte, src *block) {
+	var padded block
+	padTweak(&padded, tweak)
+	if hardwareAES() {
+		hardwareKiasuEncrypt(dst[:], rk[0][:], padded[:], src[:])
+		return
+	}
+
 	var tweaked roundKeys
-	tweakSchedule(&tweaked, rk, tweak)
+	tweakSchedule(&tweaked, rk, &padded)
 	encryptBlock(dst, &tweaked, src)
 }
 
-func kiasuDecrypt(dst []byte, rk *roundKeys, tweak, src []byte) {
+func kiasuDecrypt(dst *block, rk *roundKeys, tweak []byte, src *block) {
+	var padded block
+	padTweak(&padded, tweak)
+	if hardwareAES() {
+		hardwareKiasuDecrypt(dst[:], rk[0][:], padded[:], src[:])
+		return
+	}
+
 	var tweaked roundKeys
-	tweakSchedule(&tweaked, rk, tweak)
+	tweakSchedule(&tweaked, rk, &padded)
 	decryptBlock(dst, &tweaked, src)
 }
 
@@ -60,7 +72,10 @@ func KiasuBCEncrypt(dst, key, tweak, src []byte) ([]byte, error) {
 	if err := kiasuSchedule(&rk, dst, key, tweak, src); err != nil {
 		return nil, err
 	}
-	kiasuEncrypt(dst, &rk, tweak, src)
+	var in, out block
+	copy(in[:], src)
+	kiasuEncrypt(&out, &rk, tweak, &in)
+	copy(dst[:BlockSize], out[:])
 	return dst[:BlockSize], nil
 }
 
@@ -72,6 +87,9 @@ func KiasuBCDecrypt(dst, key, tweak, src []byte) ([]byte, error) {
 	if err := kiasuSchedule(&rk, dst, key, tweak, src); err != nil {
 		return nil, err
 	}
-	kiasuDecrypt(dst, &rk, tweak, src)
+	var in, out block
+	copy(in[:], src)
+	kiasuDecrypt(&out, &rk, tweak, &in)
+	copy(dst[:BlockSize], out[:])
 	return dst[:BlockSize], nil
 }

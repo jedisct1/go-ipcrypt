@@ -104,7 +104,7 @@ The one exception is a failure to read the random source, which the two non-dete
 | Go package                          | So package                      |
 | ----------------------------------- | ------------------------------- |
 | `net.IP`, or an address as a string | `netip.Addr`                    |
-| `crypto/aes`, hardware accelerated  | portable AES in this package    |
+| `crypto/aes`, hardware accelerated  | hardware AES, or portable AES   |
 | `New*Cipher` returns a pointer      | `Init` on a value you declared  |
 | allocates when `dst` is too short   | returns `ErrShortBuffer`        |
 | `fmt.Errorf("%w: got %d bytes"...)` | sentinel errors only            |
@@ -121,3 +121,39 @@ Call `Unmap` on the result to get an IPv4 address back:
 decrypted, err := ipcrypt.DecryptIP(key, encrypted)
 original := decrypted.Unmap()
 ```
+
+## Hardware AES
+
+The AES core has two implementations and the C compiler picks one when it transpiles, from what it knows about the target.
+
+| Target                          | What it uses                |
+| ------------------------------- | --------------------------- |
+| arm64 with `__ARM_FEATURE_AES`  | the ARMv8 AES instructions  |
+| x86-64 or i386 with `__AES__`   | AES-NI                      |
+| anything else                   | the portable code in aes.go |
+
+Every arm64 compiler that targets ARMv8 with crypto defines `__ARM_FEATURE_AES` on its own, which includes every Apple Silicon Mac.
+x86 has to be told, with `-maes` or `-march=native`:
+
+```sh
+CFLAGS="-O2 -maes" so build .
+```
+
+This is worth asking for twice over.
+The instructions are several times faster than the tables, and unlike the tables they are constant-time, so they close the cache-timing side channel that a software S-box leaves open.
+The portable fallback is the same table-driven AES the parent package already carries for KIASU-BC, which is fine when the adversary reads logs rather than sharing your CPU.
+
+On an M1 with `CFLAGS=-O2`, in ns per address:
+
+| Operation             | Hardware | Portable |
+| --------------------- | -------- | -------- |
+| deterministic encrypt |       14 |       74 |
+| deterministic decrypt |       14 |      132 |
+| nd encrypt            |       17 |       91 |
+| nd decrypt            |       10 |      146 |
+| pfx encrypt, IPv6     |      805 |    16165 |
+| pfx encrypt, IPv4     |      200 |     3985 |
+
+The prefix-preserving mode encrypts two blocks per address bit it walks, 256 blocks for IPv6 and 64 for IPv4, which is why it costs what it does.
+
+Whichever path a build selects is the one `so test ./ipcrypt` checks, since the reference vectors run through the same code as everything else.

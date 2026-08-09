@@ -54,13 +54,13 @@ var (
 // addrTo16 writes the 16-byte form of ip into dst.
 // IPv4 addresses come out in their IPv4-mapped IPv6 form, which is what every
 // IPCrypt mode operates on.
-func addrTo16(dst []byte, ip netip.Addr) error {
+func addrTo16(dst *block, ip netip.Addr) error {
 	if !ip.IsValid() {
 		return ErrInvalidIP
 	}
 	var a16 [16]byte
 	a16 = ip.As16(a16)
-	copy(dst[:16], a16[:])
+	copy(dst[:], a16[:])
 	return nil
 }
 
@@ -89,10 +89,9 @@ func ctEqual(a, b []byte) bool {
 	return diff == 0
 }
 
-// xorInto writes a ^ b into dst.
-// All three must have the same length, and dst may be a or b.
-func xorInto(dst, a, b []byte) {
-	for i := 0; i < len(dst); i++ {
+// xorBlock writes a ^ b into dst, which may be either of them.
+func xorBlock(dst, a, b *block) {
+	for i := 0; i < 16; i++ {
 		dst[i] = a[i] ^ b[i]
 	}
 }

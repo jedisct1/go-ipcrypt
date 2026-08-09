@@ -33,14 +33,16 @@ func (c *NonDeterministicCipher) EncryptIP(dst []byte, ip netip.Addr, tweak []by
 	if len(dst) < NDSize {
 		return nil, ErrShortBuffer
 	}
-	var in [16]byte
-	if err := addrTo16(in[:], ip); err != nil {
+	var in block
+	if err := addrTo16(&in, ip); err != nil {
 		return nil, err
 	}
 	if err := resolveTweak(dst[:TweakSize], tweak); err != nil {
 		return nil, err
 	}
-	kiasuEncrypt(dst[TweakSize:NDSize], &c.rk, dst[:TweakSize], in[:])
+	var out block
+	kiasuEncrypt(&out, &c.rk, dst[:TweakSize], &in)
+	copy(dst[TweakSize:NDSize], out[:])
 	return dst[:NDSize], nil
 }
 
@@ -54,8 +56,9 @@ func (c *NonDeterministicCipher) DecryptIP(ciphertext []byte) (netip.Addr, error
 	if len(ciphertext) != NDSize {
 		return netip.Addr{}, ErrInvalidCiphertext
 	}
-	var out [16]byte
-	kiasuDecrypt(out[:], &c.rk, ciphertext[:TweakSize], ciphertext[TweakSize:NDSize])
+	var in, out block
+	copy(in[:], ciphertext[TweakSize:NDSize])
+	kiasuDecrypt(&out, &c.rk, ciphertext[:TweakSize], &in)
 	return netip.AddrFrom16(out), nil
 }
 

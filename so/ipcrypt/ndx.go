@@ -36,20 +36,22 @@ func (c *NonDeterministicXCipher) EncryptIP(dst []byte, ip netip.Addr, tweak []b
 	if len(dst) < NDXSize {
 		return nil, ErrShortBuffer
 	}
-	var in [16]byte
-	if err := addrTo16(in[:], ip); err != nil {
+	var in block
+	if err := addrTo16(&in, ip); err != nil {
 		return nil, err
 	}
 	if err := resolveTweak(dst[:TweakSizeX], tweak); err != nil {
 		return nil, err
 	}
 
-	var encryptedTweak [16]byte
-	encryptBlock(encryptedTweak[:], &c.rk2, dst[:TweakSizeX])
+	var twk, encryptedTweak block
+	copy(twk[:], dst[:TweakSizeX])
+	encryptBlock(&encryptedTweak, &c.rk2, &twk)
 
-	xorInto(in[:], in[:], encryptedTweak[:])
-	encryptBlock(in[:], &c.rk1, in[:])
-	xorInto(dst[TweakSizeX:NDXSize], in[:], encryptedTweak[:])
+	xorBlock(&in, &in, &encryptedTweak)
+	encryptBlock(&in, &c.rk1, &in)
+	xorBlock(&in, &in, &encryptedTweak)
+	copy(dst[TweakSizeX:NDXSize], in[:])
 	return dst[:NDXSize], nil
 }
 
@@ -64,13 +66,15 @@ func (c *NonDeterministicXCipher) DecryptIP(ciphertext []byte) (netip.Addr, erro
 		return netip.Addr{}, ErrInvalidCiphertext
 	}
 
-	var encryptedTweak [16]byte
-	encryptBlock(encryptedTweak[:], &c.rk2, ciphertext[:TweakSizeX])
+	var twk, encryptedTweak block
+	copy(twk[:], ciphertext[:TweakSizeX])
+	encryptBlock(&encryptedTweak, &c.rk2, &twk)
 
-	var out [16]byte
-	xorInto(out[:], ciphertext[TweakSizeX:NDXSize], encryptedTweak[:])
-	decryptBlock(out[:], &c.rk1, out[:])
-	xorInto(out[:], out[:], encryptedTweak[:])
+	var out block
+	copy(out[:], ciphertext[TweakSizeX:NDXSize])
+	xorBlock(&out, &out, &encryptedTweak)
+	decryptBlock(&out, &c.rk1, &out)
+	xorBlock(&out, &out, &encryptedTweak)
 	return netip.AddrFrom16(out), nil
 }
 
