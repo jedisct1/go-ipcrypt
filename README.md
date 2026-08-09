@@ -15,6 +15,10 @@ Every mode provides a `*To` variant that writes into a caller-supplied destinati
 buffer, enabling callers to control allocations. The original functions are thin
 wrappers around these variants.
 
+A port for [Solod](https://solod.dev/), the Go subset that transpiles to C, is
+available in [so/](so/). It is a separate module, so it adds nothing to this
+package's dependencies.
+
 ## Installation
 
 ```sh
@@ -112,8 +116,8 @@ func main() {
 ### Hot-path: cached ciphers
 
 For repeated operations with the same key, create a cached cipher once and
-reuse it. This is the preferred API for hot paths — `*To` methods let you
-control allocations entirely:
+reuse it. This is the preferred API for hot paths, and the `*To` methods let
+you control allocations entirely:
 
 ```go
 // Hot-path: reuse a cached cipher for repeated operations
@@ -153,31 +157,31 @@ The original functions (without `To`) call the `*To` variant with a nil `dst`.
 
 #### Deterministic Mode (ipcrypt-deterministic)
 
-- `EncryptIPTo(dst, key []byte, ip net.IP) (net.IP, error)` — Encrypts into dst (≥ 16 bytes)
-- `EncryptIP(key []byte, ip net.IP) (net.IP, error)` — Encrypts an IP address
-- `DecryptIPTo(dst, key []byte, encrypted net.IP) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
-- `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)` — Decrypts an IP address
+- `EncryptIPTo(dst, key []byte, ip net.IP) (net.IP, error)`: Encrypts into dst (≥ 16 bytes)
+- `EncryptIP(key []byte, ip net.IP) (net.IP, error)`: Encrypts an IP address
+- `DecryptIPTo(dst, key []byte, encrypted net.IP) (net.IP, error)`: Decrypts into dst (≥ 16 bytes)
+- `DecryptIP(key []byte, encrypted net.IP) (net.IP, error)`: Decrypts an IP address
 
 #### Non-Deterministic Mode (ipcrypt-nd)
 
-- `EncryptIPNonDeterministicTo(dst []byte, ip string, key, tweak []byte) ([]byte, error)` — Encrypts into dst (≥ 24 bytes)
-- `EncryptIPNonDeterministic(ip string, key, tweak []byte) ([]byte, error)` — Encrypts with 8-byte tweak
-- `DecryptIPNonDeterministicTo(dst []byte, ciphertext, key []byte) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
-- `DecryptIPNonDeterministic(ciphertext, key []byte) (string, error)` — Decrypts ipcrypt-nd ciphertext
+- `EncryptIPNonDeterministicTo(dst []byte, ip string, key, tweak []byte) ([]byte, error)`: Encrypts into dst (≥ 24 bytes)
+- `EncryptIPNonDeterministic(ip string, key, tweak []byte) ([]byte, error)`: Encrypts with 8-byte tweak
+- `DecryptIPNonDeterministicTo(dst []byte, ciphertext, key []byte) (net.IP, error)`: Decrypts into dst (≥ 16 bytes)
+- `DecryptIPNonDeterministic(ciphertext, key []byte) (string, error)`: Decrypts ipcrypt-nd ciphertext
 
 #### Extended Non-Deterministic Mode (ipcrypt-ndx)
 
-- `EncryptIPNonDeterministicXTo(dst []byte, ip string, key, tweak []byte) ([]byte, error)` — Encrypts into dst (≥ 32 bytes)
-- `EncryptIPNonDeterministicX(ip string, key, tweak []byte) ([]byte, error)` — Encrypts with 16-byte tweak
-- `DecryptIPNonDeterministicXTo(dst []byte, ciphertext, key []byte) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
-- `DecryptIPNonDeterministicX(ciphertext, key []byte) (string, error)` — Decrypts ipcrypt-ndx ciphertext
+- `EncryptIPNonDeterministicXTo(dst []byte, ip string, key, tweak []byte) ([]byte, error)`: Encrypts into dst (≥ 32 bytes)
+- `EncryptIPNonDeterministicX(ip string, key, tweak []byte) ([]byte, error)`: Encrypts with 16-byte tweak
+- `DecryptIPNonDeterministicXTo(dst []byte, ciphertext, key []byte) (net.IP, error)`: Decrypts into dst (≥ 16 bytes)
+- `DecryptIPNonDeterministicX(ciphertext, key []byte) (string, error)`: Decrypts ipcrypt-ndx ciphertext
 
 #### Prefix-Preserving Mode (ipcrypt-pfx)
 
-- `EncryptIPPfxTo(dst []byte, ip net.IP, key []byte) (net.IP, error)` — Encrypts into dst (≥ 16 bytes)
-- `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)` — Encrypts with prefix preservation
-- `DecryptIPPfxTo(dst []byte, encryptedIP net.IP, key []byte) (net.IP, error)` — Decrypts into dst (≥ 16 bytes)
-- `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)` — Decrypts with prefix preservation
+- `EncryptIPPfxTo(dst []byte, ip net.IP, key []byte) (net.IP, error)`: Encrypts into dst (≥ 16 bytes)
+- `EncryptIPPfx(ip net.IP, key []byte) (net.IP, error)`: Encrypts with prefix preservation
+- `DecryptIPPfxTo(dst []byte, encryptedIP net.IP, key []byte) (net.IP, error)`: Decrypts into dst (≥ 16 bytes)
+- `DecryptIPPfx(encryptedIP net.IP, key []byte) (net.IP, error)`: Decrypts with prefix preservation
 
 The PFX key must be exactly 32 bytes (split into two AES-128 keys internally).
 The two 16-byte halves of the key must differ; passing identical halves returns an error.
@@ -185,14 +189,14 @@ For IPv4, `dst` must still be ≥ 16 bytes; the returned `net.IP` is `dst[12:16]
 
 #### KIASU-BC (low-level)
 
-- `KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error)` — Encrypts a 16-byte block with KIASU-BC
-- `KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error)` — Decrypts a 16-byte block with KIASU-BC
+- `KiasuBCEncrypt(key, tweak, block []byte) ([]byte, error)`: Encrypts a 16-byte block with KIASU-BC
+- `KiasuBCDecrypt(key, tweak, block []byte) ([]byte, error)`: Decrypts a 16-byte block with KIASU-BC
 
 ### Cached Cipher Types
 
 For repeated operations with the same key the cached cipher types are the
 preferred API. Construct one with the appropriate `New*` function, then call
-methods on it — the key material is expanded once and reused across calls.
+methods on it. The key material is expanded once and reused across calls.
 All cached types are safe for concurrent use.
 
 #### DeterministicCipher
