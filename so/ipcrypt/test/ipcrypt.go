@@ -1,4 +1,4 @@
-package main
+package ipcrypt_test
 
 import (
 	"solod.dev/so/crypto/crand"

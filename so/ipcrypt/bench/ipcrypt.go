@@ -1,4 +1,4 @@
-package main
+package ipcrypt_bench
 
 import (
 	"solod.dev/so/net/netip"
